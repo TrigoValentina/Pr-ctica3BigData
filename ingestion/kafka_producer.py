@@ -2,43 +2,58 @@ import json
 import time
 import logging
 from kafka import KafkaProducer
-from data_generator import generar_dato_aleatorio
+import pandas as pd
+from datetime import datetime, timezone
 
-KAFKA_BROKER_URL = "localhost:29092"
-
-TOPIC_NAME = "datos_sensores"
-
+# Configurar logs
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def crear_productor():
-    try:
-        producer = KafkaProducer(
-            bootstrap_servers=[KAFKA_BROKER_URL],
-            value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-            acks='all'
-        )
-        logger.info("Productor Kafka creado.")
-        return producer
-    except Exception as e:
-        logger.error(f"Error creando productor Kafka: {e}")
-        return None
+# Crear el productor
+producer = KafkaProducer(
+    bootstrap_servers=['localhost:29092'],
+    value_serializer=lambda v: json.dumps(v).encode('utf-8')
+)
 
-def enviar_datos():
-    producer = crear_productor()
-    if not producer:
-        return
-    try:
-        while True:
-            mensaje = generar_dato_aleatorio()
-            producer.send(TOPIC_NAME, value=mensaje)
-            producer.flush()
-            logger.info(f"Enviado: {mensaje}")
-            time.sleep(2)
-    except KeyboardInterrupt:
-        logger.info("Detención manual.")
-    finally:
-        producer.close()
+logger.info("Productor Kafka creado.")
 
-if __name__ == "__main__":
-    enviar_datos()
+# 📄 Ruta de tu archivo CSV real
+csv_path = r"C:\Users\Valentina\Videos\Pr-ctica3BigData2\data\EM310-UDL-915M soterrados nov 2024.csv"
+
+# Leer el CSV
+df = pd.read_csv(csv_path)
+
+# Convertir columna de tiempo (si existe)
+if 'time' in df.columns:
+    df['time'] = pd.to_datetime(df['time'], errors='coerce')
+else:
+    # Si no hay columna de tiempo, la agregamos
+    df['time'] = datetime.now(timezone.utc)
+
+# Eliminar filas vacías
+df = df.dropna(how="all")
+
+logger.info(f"{len(df)} registros cargados desde el CSV.")
+
+# Enviar cada fila como mensaje Kafka
+for index, row in df.iterrows():
+    data = {
+        "time": row.get("time", datetime.now(timezone.utc)).isoformat(),
+        "deviceInfo": {"deviceName": "EM310_UDL_CSV"},
+        "object": {}
+    }
+
+    # Agregar todas las columnas numéricas como sensores
+    for col in df.columns:
+        if col not in ["time"] and pd.notnull(row[col]):
+            data["object"][col] = row[col]
+
+    # Enviar al topic
+    producer.send("datos_sensores", value=data)
+    logger.info(f"Enviado ({index+1}/{len(df)}): {data}")
+
+    # Espera pequeña entre envíos para simular flujo real
+    time.sleep(1)
+
+producer.flush()
+logger.info("✅ Todos los datos del CSV fueron enviados a Kafka.")
