@@ -1,7 +1,7 @@
 import json
 from kafka import KafkaConsumer
 
-KAFKA_BROKER_URL = "localhost:29092"
+KAFKA_BROKER = "localhost:29092"
 TOPIC_NAME = "datos_sensores"
 
 consumer = KafkaConsumer(
