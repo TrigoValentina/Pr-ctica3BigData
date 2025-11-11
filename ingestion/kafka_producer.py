@@ -89,46 +89,54 @@ columnas_por_csv = {
 }
 
 # ========================
-# PROCESAR CADA CSV
+# PROCESAR Y ENVIAR DATOS DE CADA CSV
 # ========================
 for csv_path in csv_files:
     try:
-        df = pd.read_csv(csv_path, low_memory=False).dropna(how="all")
-        device_name = Path(csv_path).stem
+        nombre_csv = Path(csv_path).name
+        columnas_filtradas = columnas_por_csv.get(nombre_csv, [])
 
-        columnas_filtradas = columnas_por_csv.get(Path(csv_path).name, [])
-        logger.info(f"📤 Enviando datos desde: {device_name} ({len(df)} registros)")
+        df = pd.read_csv(csv_path, low_memory=False)
+        df = df.dropna(how="all")
+
+        logger.info(f"📤 Enviando datos desde: {nombre_csv} ({len(df)} registros)")
 
         for index, row in df.iterrows():
             data = {}
+
+            # Filtrar solo las columnas requeridas
             for col in columnas_filtradas:
                 if col in df.columns:
-                    parts = col.split(".")
+                    # Crear estructura anidada (deviceInfo, object, etc.)
+                    partes = col.split(".")
                     ref = data
-                    for p in parts[:-1]:
+                    for p in partes[:-1]:
                         if p not in ref:
                             ref[p] = {}
                         ref = ref[p]
-                    ref[parts[-1]] = row[col]
+                    ref[partes[-1]] = row[col]
 
-            # Asegurar que 'time' siempre exista
-            if 'time' not in data:
-                data['time'] = datetime.now(timezone.utc).isoformat()
-            elif isinstance(data['time'], pd.Timestamp):
-                data['time'] = data['time'].isoformat()
+            # Asegurar que 'time' esté presente
+            if "time" not in data:
+                data["time"] = datetime.now(timezone.utc).isoformat()
+            elif isinstance(data["time"], pd.Timestamp):
+                data["time"] = data["time"].isoformat()
 
+            # Enviar al tópico Kafka
             producer.send("datos_sensores", value=data)
 
             # Mostrar fila completa enviada
-            logger.info(f"📨 [{device_name}] Enviado ({index+1}/{len(df)}): {json.dumps(data, ensure_ascii=False)}")
+            logger.info(f"📨 [{nombre_csv}] Enviado ({index+1}/{len(df)}): {json.dumps(data, ensure_ascii=False)}")
 
-            time.sleep(1)  # Simular flujo real
+            time.sleep(1)  # Simula flujo real (1 segundo entre filas)
 
-        logger.info(f"✅ Envío completado para {device_name}")
+        logger.info(f"✅ Envío completado para {nombre_csv}")
 
     except Exception as e:
         logger.error(f"⚠️ Error procesando {csv_path}: {e}")
 
-# Asegurarse que todo se envíe
+# ========================
+# FINALIZAR ENVÍO
+# ========================
 producer.flush()
 logger.info("🎯 Todos los datos fueron enviados correctamente a Kafka.")

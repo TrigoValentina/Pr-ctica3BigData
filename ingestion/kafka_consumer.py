@@ -1,25 +1,24 @@
-import json
-from kafka import KafkaConsumer
+# from kafka import KafkaConsumer
+# import json
+# from etl.etl_processor import procesar_y_guardar
 
-KAFKA_BROKER = "localhost:29092"
-TOPIC_NAME = "datos_sensores"
+# KAFKA_BROKER = "localhost:29092"
+# TOPIC_NAME = "datos_sensores"
 
-consumer = KafkaConsumer(
-    TOPIC_NAME,
-    bootstrap_servers=[KAFKA_BROKER],
-    auto_offset_reset='earliest',  # leer desde el inicio si no hay offsets guardados
-    value_deserializer=lambda m: json.loads(m.decode('utf-8'))
-    # NO se pone consumer_timeout_ms
-)
+# consumer = KafkaConsumer(
+#     TOPIC_NAME,
+#     bootstrap_servers=[KAFKA_BROKER],
+#     auto_offset_reset='earliest',
+#     value_deserializer=lambda m: json.loads(m.decode('utf-8'))
+# )
 
-print("Consumidor Kafka iniciado. Esperando mensajes en tiempo real...")
+# print("📡 Consumidor Kafka escuchando datos en tiempo real...")
 
-# Bucle infinito para consumir datos a medida que llegan
-try:
-    for mensaje in consumer:
-        registro = mensaje.value
-        print(f"Recibido: {registro}")
-except KeyboardInterrupt:
-    print("🛑 Consumidor detenido manualmente")
-finally:
-    consumer.close()
+# try:
+#     for mensaje in consumer:
+#         data = mensaje.value
+#         procesar_y_guardar(data)
+# except KeyboardInterrupt:
+#     print("🛑 Consumer detenido manualmente.")
+# finally:
+#     consumer.close()
