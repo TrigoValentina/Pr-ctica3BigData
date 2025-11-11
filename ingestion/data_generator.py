@@ -1,17 +1,25 @@
-import random
+import json, random, time
+from kafka import KafkaProducer
 from datetime import datetime, timezone
 
-def generar_dato_aleatorio():
-    timestamp_actual = datetime.now(timezone.utc).isoformat()
-    return {
-        "time": timestamp_actual,
-        "deviceInfo": {"deviceName": f"Sensor_Simulado_{random.randint(1,3)}"},
-        "object": {
-            "temperature": round(random.uniform(18, 32), 2),
-            "humidity": round(random.uniform(40, 75), 2),
-            "co2": random.randint(400, 1500),
-            "pressure": round(random.uniform(1010, 1025), 2),
-            "distance": round(random.uniform(50, 200), 1),
-            "battery": round(random.uniform(3, 5), 2)
+producer = KafkaProducer(
+    bootstrap_servers=['localhost:29092'],
+    value_serializer=lambda v: json.dumps(v).encode('utf-8')
+)
+
+print("🎲 Enviando datos aleatorios... Ctrl+C para detener")
+
+try:
+    while True:
+        data = {
+            "time": datetime.now(timezone.utc).isoformat(),
+            "deviceInfo.deviceName": random.choice(["EM310", "WS302", "EM500"]),
+            "object.co2": random.uniform(350, 1000),
+            "object.temperature": random.uniform(15, 35),
+            "object.humidity": random.uniform(30, 90),
         }
-    }
+        producer.send("datos_sensores", value=data)
+        print(f"📨 Enviado: {data}")
+        time.sleep(1)
+except KeyboardInterrupt:
+    print("🛑 Simulación detenida")

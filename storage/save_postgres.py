@@ -1,51 +1,30 @@
 import psycopg2
-from psycopg2 import sql
+import pandas as pd
 
-DB_CONFIG = {
-    "host": "localhost",
-    "dbname": "sensores",
-    "user": "postgres",
-    "password": "postgres",
-    "port": 5432
-}
-
-def crear_tabla():
-    conn = psycopg2.connect(**DB_CONFIG)
-    cur = conn.cursor()
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS datos_sensores (
-        id SERIAL PRIMARY KEY,
-        time TIMESTAMP,
-        device VARCHAR(50),
-        temperature FLOAT,
-        humidity FLOAT,
-        co2 INTEGER,
-        pressure FLOAT,
-        distance FLOAT,
-        battery FLOAT
+def guardar_postgres(df):
+    conn = psycopg2.connect(
+        dbname="ambiental",
+        user="postgres",
+        password="postgres",
+        host="localhost",
+        port="5432"
     )
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sensores (
+            id SERIAL PRIMARY KEY,
+            time TIMESTAMP,
+            device_name TEXT,
+            variable TEXT,
+            valor TEXT
+        );
     """)
+    for _, row in df.iterrows():
+        for col, val in row.items():
+            cursor.execute(
+                "INSERT INTO sensores (time, device_name, variable, valor) VALUES (%s,%s,%s,%s)",
+                (row.get("time"), row.get("deviceInfo.deviceName", "N/A"), col, str(val))
+            )
     conn.commit()
-    cur.close()
-    conn.close()
-
-def guardar_postgres(registro: dict):
-    crear_tabla()
-    conn = psycopg2.connect(**DB_CONFIG)
-    cur = conn.cursor()
-    cur.execute("""
-    INSERT INTO datos_sensores(time, device, temperature, humidity, co2, pressure, distance, battery)
-    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-    """, (
-        registro['time'],
-        registro['deviceInfo'].get('deviceName'),
-        registro['object'].get('temperature'),
-        registro['object'].get('humidity'),
-        registro['object'].get('co2'),
-        registro['object'].get('pressure'),
-        registro['object'].get('distance'),
-        registro['object'].get('battery')
-    ))
-    conn.commit()
-    cur.close()
+    cursor.close()
     conn.close()

@@ -1,11 +1,10 @@
 from pymongo import MongoClient
 
-MONGO_URI = "mongodb://localhost:27017/"
-DB_NAME = "sensores"
-COLLECTION_NAME = "datos"
-
-def guardar_mongodb(registro: dict):
-    client = MongoClient(MONGO_URI)
-    db = client[DB_NAME]
-    collection = db[COLLECTION_NAME]
-    collection.insert_one(registro)
+def guardar_mongodb(df):
+    client = MongoClient("mongodb://localhost:27017/")
+    db = client["ambiental_db"]
+    coleccion = db["sensores"]
+    data_json = df.to_dict(orient="records")
+    if data_json:
+        coleccion.insert_many(data_json)
+    client.close()
