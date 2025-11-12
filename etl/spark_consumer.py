@@ -4,7 +4,7 @@ from pyspark.sql.types import StructType, StructField, StringType
 import psycopg2
 from pymongo import MongoClient
 
-POSTGRES_HOST = "db.yynzqzlnknngffbsixmh.supabase.co"
+POSTGRES_HOST = "2600:1f18:2e13:9d3b:f2d3:1c1c:e91d:3"
 POSTGRES_DB = "postgres"
 POSTGRES_USER = "postgres"
 POSTGRES_PASSWORD = "Womita1425."
