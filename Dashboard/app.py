@@ -8,7 +8,7 @@ import os
 # =============================
 st.set_page_config(
     page_title="Dashboard Ambiental - Big Data",
-    page_icon="",
+    page_icon="🌎",
     layout="wide"
 )
 
@@ -18,20 +18,42 @@ DATA_PATH = "../data"
 def load_data(filename):
     path = os.path.join(DATA_PATH, filename)
     df = pd.read_csv(path)
+
+    # Si hay columna 'time', convertir y filtrar últimos 15 días
+    if "time" in df.columns:
+        df["time"] = pd.to_datetime(df["time"], errors="coerce")
+        df = df.dropna(subset=["time"])
+        if not df.empty:
+            last_date = df["time"].max()
+            start_date = last_date - pd.Timedelta(days=15)
+            df = df[df["time"] >= start_date]
+    
+    # Realizamos un downsampling para reducir la densidad de datos (ej: cada 10 registros)
+    df = downsample_data(df, step=10)
     return df
+
+# ==============================
+# DOWN SAMPLING DE LOS DATOS
+# ==============================
+
+def downsample_data(df, step=10):
+    """
+    Realiza un downsampling (muestreo) de los datos seleccionando solo cada 'step' valor.
+    """
+    return df.iloc[::step]
 
 # Sidebar
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/4149/4149670.png", width=110)
 menu = st.sidebar.radio(
-    "Selecciona una sección",
+    "📊 Selecciona una sección",
     ["Calidad del Aire (EM500)", "Calidad del Sonido (WS302)", "Sensores Soterrados (EM310)"]
 )
 
 # ============================================================
-# CALIDAD DEL AIRE - EM500
+# 🌫️ CALIDAD DEL AIRE - EM500
 # ============================================================
 if menu == "Calidad del Aire (EM500)":
-    st.markdown("## Calidad del Aire - Sensor EM500")
+    st.markdown("## 🌫️ Calidad del Aire - Sensor EM500")
     df = load_data("EM500-CO2-915M nov 2024.csv")
 
     col1, col2, col3, col4 = st.columns(4)
@@ -40,7 +62,7 @@ if menu == "Calidad del Aire (EM500)":
     col3.metric("Humedad (%)", f"{df['object.humidity'].mean():.1f}")
     col4.metric("Presión (hPa)", f"{df['object.pressure'].mean():.1f}")
 
-    st.markdown("### Evolución temporal de variables")
+    st.markdown("### 📈 Evolución temporal de variables (últimos 15 días)")
     col1, col2 = st.columns(2)
 
     with col1:
@@ -60,10 +82,10 @@ if menu == "Calidad del Aire (EM500)":
         st.plotly_chart(fig_pres, use_container_width=True)
 
 # ============================================================
-# CALIDAD DEL SONIDO - WS302
+# 🔊 CALIDAD DEL SONIDO - WS302
 # ============================================================
 elif menu == "Calidad del Sonido (WS302)":
-    st.markdown("## Calidad del Sonido - Sensor WS302")
+    st.markdown("## 🔊 Calidad del Sonido - Sensor WS302")
     df = load_data("WS302-915M SONIDO NOV 2024.csv")
 
     # Normalizar columnas para evitar errores por mayúsculas
@@ -77,7 +99,6 @@ elif menu == "Calidad del Sonido (WS302)":
     if not col_ruido:
         st.error("No se encontró ninguna columna de ruido (LAeq, Leq o noise).")
     else:
-        # Métricas
         col1, col2, col3 = st.columns(3)
         col1.metric("Ruido Promedio (dB)", f"{df[col_ruido].mean():.1f}")
         if col_max:
@@ -89,46 +110,24 @@ elif menu == "Calidad del Sonido (WS302)":
         else:
             col3.metric("Batería Promedio (%)", "N/A")
 
-        # Gráfico de distribución
-        st.markdown("### Distribución de niveles de ruido")
-        fig1 = px.histogram(
-            df,
-            x=col_ruido,
-            nbins=50,
-            color_discrete_sequence=["#0077b6"],
-            title=f"Frecuencia de Niveles de Ruido ({col_ruido})"
-        )
+        st.markdown("### 🔊 Distribución de niveles de ruido (últimos 15 días)")
+        fig1 = px.histogram(df, x=col_ruido, nbins=50, color_discrete_sequence=["#0077b6"], title=f"Frecuencia de Niveles de Ruido ({col_ruido})")
         st.plotly_chart(fig1, use_container_width=True)
 
-        # Gráfico temporal
-        st.markdown("### Evolución del ruido en el tiempo")
-        fig2 = px.line(
-            df,
-            x="time",
-            y=col_ruido,
-            color_discrete_sequence=["#00b4d8"],
-            title=f"Tendencia del Nivel de Ruido ({col_ruido}) en el Tiempo"
-        )
+        st.markdown("### 📈 Evolución del ruido en el tiempo (últimos 15 días)")
+        fig2 = px.line(df, x="time", y=col_ruido, color_discrete_sequence=["#00b4d8"], title=f"Tendencia del Nivel de Ruido ({col_ruido})")
         st.plotly_chart(fig2, use_container_width=True)
 
-        # Comparativa si hay datos de máximo
         if col_max:
-            st.markdown("### Comparativa entre niveles promedio y máximo")
-            fig3 = px.line(
-                df,
-                x="time",
-                y=[col_ruido, col_max],
-                labels={"value": "dB", "variable": "Indicador"},
-                title="Comparativa: Nivel Promedio vs Nivel Máximo"
-            )
+            st.markdown("### 📊 Comparativa entre niveles promedio y máximo")
+            fig3 = px.line(df, x="time", y=[col_ruido, col_max], labels={"value": "dB", "variable": "Indicador"}, title="Comparativa: Nivel Promedio vs Nivel Máximo")
             st.plotly_chart(fig3, use_container_width=True)
 
-
 # ============================================================
-# SENSORES SOTERRADOS - EM310
+# 🌱 SENSORES SOTERRADOS - EM310
 # ============================================================
 elif menu == "Sensores Soterrados (EM310)":
-    st.markdown("## Sensores Soterrados - EM310")
+    st.markdown("## 🌱 Sensores Soterrados - EM310")
     df = load_data("EM310-UDL-915M soterrados nov 2024.csv")
 
     col1, col2, col3 = st.columns(3)
@@ -136,11 +135,11 @@ elif menu == "Sensores Soterrados (EM310)":
     col2.metric("Batería Promedio (V)", f"{df['object.battery'].mean():.1f}")
     col3.metric("Eventos Registrados", len(df))
 
-    st.markdown("### Nivel de distancia en el tiempo")
+    st.markdown("### 📈 Nivel de distancia en el tiempo (últimos 15 días)")
     fig1 = px.line(df, x="time", y="object.distance", title="Evolución de la Distancia Detectada", color_discrete_sequence=["#2a9d8f"])
     st.plotly_chart(fig1, use_container_width=True)
 
-    st.markdown("### Distribución de sensores por estado")
+    st.markdown("### 📊 Distribución de sensores por estado")
     if 'object.status' in df.columns:
         fig2 = px.pie(df, names='object.status', title="Estado de los Sensores", color_discrete_sequence=px.colors.qualitative.Safe)
         st.plotly_chart(fig2, use_container_width=True)
