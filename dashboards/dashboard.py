@@ -31,7 +31,7 @@ def leer_datos_kafka(broker, max_mensajes=100):
         consumer = KafkaConsumer(
             TOPIC_NAME,
             bootstrap_servers=[broker],
-            auto_offset_reset='earliest',  # Desde el primer mensaje disponible
+            auto_offset_reset='earliest',
             value_deserializer=lambda m: json.loads(m.decode('utf-8')),
             consumer_timeout_ms=1000
         )
@@ -45,14 +45,20 @@ def leer_datos_kafka(broker, max_mensajes=100):
         if registros:
             # Normaliza JSON anidado
             df = pd.json_normalize(registros)
-            # Convertir columna time a datetime
-            df['time'] = pd.to_datetime(df['time'])
+            
+            # --- CORRECCIÓN AQUI ---
+            # Convertir columna time a datetime usando format='mixed' para evitar el error
+            df['time'] = pd.to_datetime(df['time'], format='mixed', utc=True)
+            # -----------------------
+
             # Ordenar por tiempo
             df = df.sort_values('time')
             return df
         else:
             return pd.DataFrame()
     except Exception as e:
+        # Imprimimos el error en consola también para depurar
+        print(f"Error Kafka: {e}")
         st.error(f"Error al conectar con Kafka: {e}")
         return pd.DataFrame()
 
@@ -73,7 +79,7 @@ df = leer_datos_kafka(KAFKA_BROKER, max_mensajes=200)
 if df.empty:
     st.warning("No hay datos recientes de Kafka. Espera unos segundos...")
 else:
-# =============================
+    # =============================
     # CALIDAD DEL AIRE
     # =============================
     if menu == "Calidad del Aire (EM500)":
@@ -117,8 +123,8 @@ else:
         else:
             # Mensaje amigable en lugar de error rojo
             st.info("⏳ No se detectaron datos de Calidad del Aire (CO2) en los últimos mensajes recibidos. Tal vez solo están llegando datos de Sonido o Distancia.")
-
-# =============================
+   
+    # =============================
     # CALIDAD DEL SONIDO
     # =============================
     elif menu == "Calidad del Sonido (WS302)":
@@ -152,7 +158,7 @@ else:
                 st.warning(f"Se encontró la columna '{col_ruido}', pero no tiene datos válidos.")
         else:
             st.info("🔇 No se detectaron datos de Sonido en este momento. Kafka está enviando otro tipo de sensores.")
-            
+
     # =============================
     # SENSORES SOTERRADOS
     # =============================

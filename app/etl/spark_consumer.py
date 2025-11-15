@@ -1,27 +1,14 @@
-from pyspark.sql import SparkSession, Row
+from pyspark.sql import SparkSession
 from pyspark.sql.functions import from_json, col, to_timestamp
 from pyspark.sql.types import StructType, StructField, StringType
-import psycopg2
 from pymongo import MongoClient
-from pyspark.sql.streaming import StreamingQuery
-import socket
 
-# ===============================
-# Configuraciones de Bases de Datos
-# ===============================
-POSTGRES_HOST = "db.yynzqzlnknngffbsixmh.supabase.co"  # o el host de tu contenedor local
-POSTGRES_DB = "postgres"
-POSTGRES_USER = "postgres"
-POSTGRES_PASSWORD = "Womita1425."
-POSTGRES_PORT = 5432
-
-MONGO_URI = "mongodb://mongodb:27017/"  # nombre del contenedor Mongo
+# === CONFIGURACIÓN DE MONGO ATLAS ===
+MONGO_URI = "mongodb+srv://emergentes118_db_user:Womita14@cluster0.xcvehjm.mongodb.net/?retryWrites=true&w=majority"
 MONGO_DB = "gamc_db"
 MONGO_COLLECTION = "sensores"
 
-# ===============================
-# Schema de JSON
-# ===============================
+# === Esquema del JSON que llega por Kafka ===
 schema = StructType([
     StructField("time", StringType()),
     StructField("deviceInfo", StructType([
@@ -53,113 +40,59 @@ schema = StructType([
     ]))
 ])
 
-# ===============================
-# Funciones de guardado
-# ===============================
-def guardar_postgres_tablas(df_row):
+# === Función para guardar documentos en Mongo Atlas ===
+def guardar_mongo(doc):
     try:
-        # --- Solución para el problema de IPv6 en Docker ---
-        # Resolvemos el hostname a su dirección IPv4 justo antes de conectar.
-        try:
-            host_ip = socket.gethostbyname(POSTGRES_HOST)
-        except socket.gaierror:
-            host_ip = POSTGRES_HOST # Si falla, usamos el original
-
-        conn = psycopg2.connect(
-            dbname=POSTGRES_DB,
-            user=POSTGRES_USER,
-            password=POSTGRES_PASSWORD,
-            host=host_ip, # Usamos la IP resuelta
-            port=POSTGRES_PORT
-        )
-        cursor = conn.cursor()
-        # Elegir tabla según datos
-        if "distance" in df_row:
-            tabla = "em310_soterrados"
-        elif "co2" in df_row:
-            tabla = "em500_co2"
-        elif "LAeq" in df_row:
-            tabla = "ws302_sonido"
-        else:
-            tabla = "otros"
-
-        # Crear tabla dinámica
-        cols_defs = ", ".join([f"{col} TEXT" for col in df_row.keys()])
-        cursor.execute(f"CREATE TABLE IF NOT EXISTS {tabla} (id SERIAL PRIMARY KEY, {cols_defs});")
-
-        # Insertar fila
-        cols_str = ", ".join(df_row.keys())
-        vals_str = ", ".join(["%s"] * len(df_row))
-        vals = [str(v) for v in df_row.values()]
-        cursor.execute(f"INSERT INTO {tabla} ({cols_str}) VALUES ({vals_str})", vals)
-
-        conn.commit()
-        cursor.close()
-        conn.close()
-    except Exception as e:
-        print(f"⚠️ Error Postgres: {e}")
-
-def guardar_mongo(df_row):
-    try:
-        client = MongoClient(MONGO_URI)
+        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
         db = client[MONGO_DB]
         collection = db[MONGO_COLLECTION]
-        collection.insert_one(df_row)
+        collection.insert_one(doc)
+        client.close()
+        print(f"✅ Insertado en Mongo Atlas: {doc.get('device_name', 'sin_nombre')}")
     except Exception as e:
-        print(f"⚠️ Error MongoDB: {e}")
+        print(f"⚠️ Error MongoDB Atlas: {e}")
 
-# ===============================
-# Spark Session
-# ===============================
-spark = SparkSession.builder.appName("Kafka_ETL_Streaming").getOrCreate()
+# === Crear sesión de Spark ===
+spark = SparkSession.builder.appName("Kafka_ETL_Streaming_MongoAtlas").getOrCreate()
 
-# ===============================
-# Leer de Kafka
-# ===============================
+# === Leer stream desde Kafka (nombre del servicio dentro de docker-compose) ===
 df = spark.readStream.format("kafka") \
     .option("kafka.bootstrap.servers", "kafka:9092") \
     .option("subscribe", "datos_sensores") \
     .option("startingOffsets", "earliest") \
     .load()
 
+# === Parsear el JSON recibido ===
 df_json = df.selectExpr("CAST(value AS STRING) as json_str") \
     .select(from_json(col("json_str"), schema).alias("data")) \
     .select("data.*")
 
+# Convertir campo de tiempo
 df_json = df_json.withColumn("time", to_timestamp(col("time")))
 
-# ===============================
-# Procesamiento de filas
-# ===============================
-class ProcesarFila:
-    def open(self, partition_id, epoch_id):
-        return True
-    def process(self, row: Row):
-        row_dict = row.asDict(recursive=True)
-        flat_dict = {}
+# === Procesar cada fila y enviar a Mongo Atlas ===
+def procesar_fila(row):
+    row_dict = row.asDict(recursive=True)
+    flat = {}
 
-        # Aplanar 'object'
-        if "object" in row_dict:
-            flat_dict.update(row_dict["object"])
-        # Aplanar 'deviceInfo'
-        if "deviceInfo" in row_dict:
-            flat_dict["device_name"] = row_dict["deviceInfo"].get("deviceName")
-            flat_dict["tenant_name"] = row_dict["deviceInfo"].get("tenantName")
-            if "tags" in row_dict["deviceInfo"]:
-                flat_dict["Address"] = row_dict["deviceInfo"]["tags"].get("Address")
-                flat_dict["Location"] = row_dict["deviceInfo"]["tags"].get("Location")
+    # Aplanar 'object'
+    obj = row_dict.get("object") or {}
+    flat.update({k: obj.get(k) for k in obj.keys()})
 
-        flat_dict["time"] = row_dict.get("time")
+    # Aplanar 'deviceInfo'
+    dev = row_dict.get("deviceInfo") or {}
+    flat["device_name"] = dev.get("deviceName")
+    flat["tenant_name"] = dev.get("tenantName")
+    tags = dev.get("tags") or {}
+    flat["Address"] = tags.get("Address")
+    flat["Location"] = tags.get("Location")
 
-        # Guardar en bases de datos
-        guardar_postgres_tablas(flat_dict)
-        guardar_mongo(flat_dict)
+    # Agregar timestamp
+    flat["time"] = row_dict.get("time")
 
-    def close(self, error):
-        pass
+    # Guardar en Mongo Atlas
+    guardar_mongo(flat)
 
-# ===============================
-# Streaming
-# ===============================
-query = df_json.writeStream.foreach(ProcesarFila()).outputMode("append").start()
+# === Iniciar el stream de Spark ===
+query = df_json.writeStream.foreach(procesar_fila).outputMode("append").start()
 query.awaitTermination()
