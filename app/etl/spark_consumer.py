@@ -4,6 +4,7 @@ from pyspark.sql.types import StructType, StructField, StringType
 import psycopg2
 from pymongo import MongoClient
 from pyspark.sql.streaming import StreamingQuery
+import socket
 
 # ===============================
 # Configuraciones de Bases de Datos
@@ -57,11 +58,18 @@ schema = StructType([
 # ===============================
 def guardar_postgres_tablas(df_row):
     try:
+        # --- Solución para el problema de IPv6 en Docker ---
+        # Resolvemos el hostname a su dirección IPv4 justo antes de conectar.
+        try:
+            host_ip = socket.gethostbyname(POSTGRES_HOST)
+        except socket.gaierror:
+            host_ip = POSTGRES_HOST # Si falla, usamos el original
+
         conn = psycopg2.connect(
             dbname=POSTGRES_DB,
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
-            host=POSTGRES_HOST,
+            host=host_ip, # Usamos la IP resuelta
             port=POSTGRES_PORT
         )
         cursor = conn.cursor()

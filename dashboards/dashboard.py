@@ -73,68 +73,118 @@ df = leer_datos_kafka(KAFKA_BROKER, max_mensajes=200)
 if df.empty:
     st.warning("No hay datos recientes de Kafka. Espera unos segundos...")
 else:
-    # =============================
+# =============================
     # CALIDAD DEL AIRE
     # =============================
     if menu == "Calidad del Aire (EM500)":
         st.markdown("## 🌫️ Calidad del Aire - EM500")
 
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("CO₂ Promedio (ppm)", f"{df['object.co2'].mean():.1f}")
-        col2.metric("Temperatura (°C)", f"{df['object.temperature'].mean():.1f}")
-        col3.metric("Humedad (%)", f"{df['object.humidity'].mean():.1f}")
-        col4.metric("Presión (hPa)", f"{df['object.pressure'].mean():.1f}")
+        # --- CORRECCIÓN DE SEGURIDAD ---
+        # Verificamos si llegaron datos con la columna de CO2
+        if 'object.co2' in df.columns:
+            
+            # Filtramos solo las filas que tengan datos de CO2 válidos (quitamos NaNs)
+            df_aire = df.dropna(subset=['object.co2'])
 
-        st.markdown("### 📈 Evolución temporal")
-        fig_co2 = px.line(df, x='time', y='object.co2', title="CO₂ (ppm)", color_discrete_sequence=['#2196f3'])
-        st.plotly_chart(fig_co2, use_container_width=True)
+            if not df_aire.empty:
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("CO₂ Promedio (ppm)", f"{df_aire['object.co2'].mean():.1f}")
+                
+                # Usamos .get() para las otras columnas por si acaso alguna falta
+                temp = df_aire['object.temperature'].mean() if 'object.temperature' in df_aire.columns else 0
+                col2.metric("Temperatura (°C)", f"{temp:.1f}")
+                
+                hum = df_aire['object.humidity'].mean() if 'object.humidity' in df_aire.columns else 0
+                col3.metric("Humedad (%)", f"{hum:.1f}")
+                
+                pres = df_aire['object.pressure'].mean() if 'object.pressure' in df_aire.columns else 0
+                col4.metric("Presión (hPa)", f"{pres:.1f}")
 
-        fig_temp = px.line(df, x='time', y='object.temperature', title="Temperatura (°C)", color_discrete_sequence=['#e76f51'])
-        st.plotly_chart(fig_temp, use_container_width=True)
+                st.markdown("### 📈 Evolución temporal")
+                fig_co2 = px.line(df_aire, x='time', y='object.co2', title="CO₂ (ppm)", color_discrete_sequence=['#2196f3'])
+                st.plotly_chart(fig_co2, use_container_width=True)
 
-        fig_hum = px.area(df, x='time', y='object.humidity', title="Humedad (%)", color_discrete_sequence=['#2a9d8f'])
-        st.plotly_chart(fig_hum, use_container_width=True)
+                # Solo mostramos los otros gráficos si las columnas existen
+                if 'object.temperature' in df_aire.columns:
+                    fig_temp = px.line(df_aire, x='time', y='object.temperature', title="Temperatura (°C)", color_discrete_sequence=['#e76f51'])
+                    st.plotly_chart(fig_temp, use_container_width=True)
+                
+                if 'object.humidity' in df_aire.columns:
+                    fig_hum = px.area(df_aire, x='time', y='object.humidity', title="Humedad (%)", color_discrete_sequence=['#2a9d8f'])
+                    st.plotly_chart(fig_hum, use_container_width=True)
+            else:
+                st.warning("Se encontraron columnas de CO2, pero los datos están vacíos.")
+        else:
+            # Mensaje amigable en lugar de error rojo
+            st.info("⏳ No se detectaron datos de Calidad del Aire (CO2) en los últimos mensajes recibidos. Tal vez solo están llegando datos de Sonido o Distancia.")
 
-        fig_pres = px.line(df, x='time', y='object.pressure', title="Presión (hPa)", color_discrete_sequence=['#6a4c93'])
-        st.plotly_chart(fig_pres, use_container_width=True)
-
-    # =============================
+# =============================
     # CALIDAD DEL SONIDO
     # =============================
     elif menu == "Calidad del Sonido (WS302)":
         st.markdown("## 🔊 Calidad del Sonido - WS302")
 
-        # Algunos CSV usan 'object.noise' o 'object.laeq'
-        col_ruido = 'object.noise' if 'object.noise' in df.columns else 'object.laeq'
+        # 1. Buscamos cuál columna de ruido llegó (noise o laeq)
+        col_ruido = None
+        if 'object.noise' in df.columns:
+            col_ruido = 'object.noise'
+        elif 'object.laeq' in df.columns:
+            col_ruido = 'object.laeq'
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Ruido Promedio (dB)", f"{df[col_ruido].mean():.1f}")
-        col2.metric("Nivel Máximo (dB)", f"{df[col_ruido].max():.1f}")
-        if 'object.battery' in df.columns:
-            col3.metric("Batería Promedio (%)", f"{df['object.battery'].mean():.1f}")
+        # 2. Solo procedemos si encontramos alguna columna de ruido válida
+        if col_ruido:
+            # Filtramos para quitar filas vacías de esa columna específica
+            df_sound = df.dropna(subset=[col_ruido])
+
+            if not df_sound.empty:
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Ruido Promedio (dB)", f"{df_sound[col_ruido].mean():.1f}")
+                col2.metric("Nivel Máximo (dB)", f"{df_sound[col_ruido].max():.1f}")
+                
+                # Verificación segura de batería
+                bat = df_sound['object.battery'].mean() if 'object.battery' in df_sound.columns else 0
+                col3.metric("Batería Promedio (%)", f"{bat:.1f}")
+
+                st.markdown("### 🔊 Evolución del ruido")
+                fig_noise = px.line(df_sound, x='time', y=col_ruido, title="Nivel de Ruido (dB)", color_discrete_sequence=['#0077b6'])
+                st.plotly_chart(fig_noise, use_container_width=True)
+            else:
+                st.warning(f"Se encontró la columna '{col_ruido}', pero no tiene datos válidos.")
         else:
-            col3.metric("Batería Promedio (%)", "N/A")
-
-        st.markdown("### 🔊 Evolución del ruido")
-        fig_noise = px.line(df, x='time', y=col_ruido, title="Nivel de Ruido (dB)", color_discrete_sequence=['#0077b6'])
-        st.plotly_chart(fig_noise, use_container_width=True)
-
+            st.info("🔇 No se detectaron datos de Sonido en este momento. Kafka está enviando otro tipo de sensores.")
+            
     # =============================
     # SENSORES SOTERRADOS
     # =============================
     elif menu == "Sensores Soterrados (EM310)":
         st.markdown("## 🌱 Sensores Soterrados - EM310")
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Distancia Promedio (cm)", f"{df['object.distance'].mean():.1f}")
-        col2.metric("Batería Promedio (V)", f"{df['object.battery'].mean():.1f}")
-        col3.metric("Eventos Registrados", len(df))
+        # --- PROTECCIÓN CONTRA ERROR ---
+        if 'object.distance' in df.columns:
+            # Filtramos filas validas
+            df_sot = df.dropna(subset=['object.distance'])
+            
+            if not df_sot.empty:
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Distancia Promedio (cm)", f"{df_sot['object.distance'].mean():.1f}")
+                
+                bat = df_sot['object.battery'].mean() if 'object.battery' in df_sot.columns else 0
+                col2.metric("Batería Promedio (V)", f"{bat:.1f}")
+                
+                col3.metric("Eventos Registrados", len(df_sot))
 
-        st.markdown("### 📊 Evolución de distancia")
-        fig_dist = px.line(df, x='time', y='object.distance', title="Distancia (cm)", color_discrete_sequence=['#2a9d8f'])
-        st.plotly_chart(fig_dist, use_container_width=True)
+                st.markdown("### 📊 Evolución de distancia")
+                fig_dist = px.line(df_sot, x='time', y='object.distance', title="Distancia (cm)", color_discrete_sequence=['#2a9d8f'])
+                st.plotly_chart(fig_dist, use_container_width=True)
 
-        if 'object.status' in df.columns:
-            st.markdown("### 📍 Estado de los sensores")
-            fig_status = px.pie(df, names='object.status', title="Estado de los Sensores", color_discrete_sequence=px.colors.qualitative.Safe)
-            st.plotly_chart(fig_status, use_container_width=True)
+                if 'object.status' in df_sot.columns:
+                    st.markdown("### 📍 Estado de los sensores")
+                    # Limpiamos nulos en status para el pie chart
+                    df_status = df_sot.dropna(subset=['object.status'])
+                    if not df_status.empty:
+                        fig_status = px.pie(df_status, names='object.status', title="Estado de los Sensores", color_discrete_sequence=px.colors.qualitative.Safe)
+                        st.plotly_chart(fig_status, use_container_width=True)
+            else:
+                 st.warning("Llegaron columnas de distancia, pero los valores están vacíos.")
+        else:
+            st.info("🚜 No se detectaron datos de Sensores Soterrados en este momento. Kafka está enviando otro tipo de sensores.")
