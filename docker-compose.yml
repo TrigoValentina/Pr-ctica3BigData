@@ -40,6 +40,9 @@ services:
     volumes:
       - ./app:/opt/spark/app
       - ./data:/opt/spark/data
+    dns:
+    - 8.8.8.8
+    - 1.1.1.1
 
   spark-worker:
     image: apache/spark:3.5.3
@@ -71,3 +74,8 @@ services:
 
 volumes:
   mongo_data:
+
+networks:
+  default:
+    driver: bridge
+    internal: false
