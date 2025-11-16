@@ -1,19 +1,47 @@
 import streamlit as st
 from jwt_utils import verify_token
-from pymongo import MongoClient
 import pandas as pd
 import plotly.express as px
-from datetime import datetime, timedelta
+from kafka import KafkaConsumer
+import json
+import datetime
 
 st.set_page_config(page_title="Panel Ejecutivo", page_icon="", layout="wide")
 
-# Ocultar sidebar
-st.markdown("""
-<style>
-section[data-testid="stSidebar"] { display:none; }
-div[data-testid="stAppViewContainer"] { margin-left:0 !important; }
-</style>
-""", unsafe_allow_html=True)
+# =============================
+# CONFIGURACIÓN KAFKA
+# =============================
+KAFKA_BROKER = "localhost:29092"
+TOPIC_NAME = "datos_sensores"
+
+# =============================
+# FUNCIONES
+# =============================
+@st.cache_data(ttl=60)  # Cache más largo para análisis
+def leer_datos_kafka(broker, max_mensajes=2000):
+    """Lee una mayor cantidad de mensajes de Kafka para análisis histórico."""
+    try:
+        consumer = KafkaConsumer(
+            TOPIC_NAME,
+            bootstrap_servers=[broker],
+            auto_offset_reset='earliest',
+            value_deserializer=lambda m: json.loads(m.decode('utf-8')),
+            consumer_timeout_ms=1000
+        )
+        registros = [msg.value for i, msg in enumerate(consumer) if i < max_mensajes]
+        consumer.close()
+
+        if registros:
+            df = pd.json_normalize(registros)
+            df['time'] = pd.to_datetime(df['time'])
+            # Para análisis, es mejor tenerlo ordenado de forma ascendente
+            return df.sort_values('time', ascending=True)
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Error al conectar con Kafka: {e}")
+        return pd.DataFrame()
+
+
 
 # ================================
 # VALIDACIÓN DE SESIÓN SEGURA
@@ -44,133 +72,98 @@ if decoded.get("role") != role_requerido:
     st.stop()
 
 # ================================
-# 🔘 BOTÓN DE LOGOUT
+# LAYOUT Y ESTILOS
 # ================================
 st.markdown("""
 <style>
-.top-bar { display:flex; justify-content:flex-end; }
-.top-bar button { background:#e74c3c; color:white; border-radius:8px; }
+    /* Ocultar sidebar por defecto */
+    section[data-testid="stSidebar"] { display: none; }
+    /* Botón de logout */
+    .stButton>button {
+        background-color: #e74c3c;
+        color: white;
+        border-radius: 8px;
+        border: none;
+    }
+    /* Títulos del resumen estadístico */
+    .resumen-title {
+        font-size: 1.5rem;
+        font-weight: bold;
+        margin-bottom: 1rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-top1, top2 = st.columns([8,2])
-with top2:
-    st.markdown('<div class="top-bar">', unsafe_allow_html=True)
-    if st.button("🔒 Cerrar sesión"):
-        st.session_state.clear()
+# ================================
+# TÍTULO Y LOGOUT
+# ================================
+col_titulo, col_logout = st.columns([0.85, 0.15])
+with col_titulo:
+    st.title("📈 Panel de Análisis Ejecutivo")
+with col_logout:
+    if st.button("Cerrar sesión", use_container_width=True):
+        session.clear()
         st.switch_page("pages/auth_app.py")
-    st.markdown('</div>', unsafe_allow_html=True)
 
-st.title("📈 Panel Ejecutivo")
-st.markdown("Análisis de tendencias y KPIs históricos.")
+st.markdown("---")
 
 # ================================
-# ⚙️ CONFIGURACIÓN Y CONEXIÓN A MONGODB
+# CARGA DE DATOS
 # ================================
-MONGO_URI = "mongodb+srv://emergentes118_db_user:Womita14@cluster0.xcvehjm.mongodb.net/?retryWrites=true&w=majority"
-MONGO_DB = "gamc_db"
-MONGO_COLLECTION = "sensores"
+df_full = leer_datos_kafka(KAFKA_BROKER)
 
-@st.cache_resource
-def get_mongo_client():
-    """Crea y cachea la conexión a MongoDB."""
-    try:
-        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-        client.server_info() # Fuerza la conexión para probarla
-        return client
-    except Exception as e:
-        st.error(f"No se pudo conectar a MongoDB: {e}")
-        return None
-
-@st.cache_data(ttl=300) # Cache por 5 minutos
-def fetch_data_from_mongo(_client, start_date, end_date):
-    """Obtiene datos de MongoDB para un rango de fechas."""
-    if _client is None:
-        return pd.DataFrame()
-    
-    db = _client[MONGO_DB]
-    collection = db[MONGO_COLLECTION]
-    
-    query = {"time": {"$gte": start_date, "$lte": end_date}}
-    cursor = collection.find(query)
-    df = pd.DataFrame(list(cursor))
-
-    if not df.empty:
-        df['time'] = pd.to_datetime(df['time'])
-        # Convertir columnas numéricas, forzando errores a NaN
-        for col in ['co2', 'LAeq', 'distance', 'temperature', 'humidity']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-    return df
-
-# ================================
-# 🎨 UI: FILTROS Y CARGA DE DATOS
-# ================================
-client = get_mongo_client()
-
-st.sidebar.header("Filtros")
-end_date = datetime.now()
-start_date = st.sidebar.date_input("Fecha de inicio", end_date - timedelta(days=30))
-end_date_ui = st.sidebar.date_input("Fecha de fin", end_date)
-
-# Convertir a datetime para la query
-start_datetime = datetime.combine(start_date, datetime.min.time())
-end_datetime = datetime.combine(end_date_ui, datetime.max.time())
-
-df = fetch_data_from_mongo(client, start_datetime, end_datetime)
-
-if client is None:
+if df_full.empty:
+    st.warning("No se encontraron datos para el análisis. Esperando mensajes...")
     st.stop()
 
-if df.empty:
-    st.warning("No se encontraron datos históricos para el período seleccionado.")
-    st.stop()
+# Usaremos CO2 como la métrica principal para este dashboard
+df_main = df_full[df_full['object.co2'].notna()].copy()
 
 # ================================
-# 📊 VISUALIZACIONES POR TABS
+# CONTROLES DE FILTRO
 # ================================
-tab1, tab2, tab3 = st.tabs(["🌫️ Calidad del Aire", "🔊 Ruido Ambiental", "🌱 Gestión de Residuos"])
+st.subheader("Filtros de Análisis")
 
-with tab1:
-    st.header("Análisis de Calidad del Aire (CO₂)")
-    df_aire = df.dropna(subset=['co2'])
-    if not df_aire.empty:
-        avg_co2 = df_aire['co2'].mean()
-        st.metric("CO₂ Promedio (ppm)", f"{avg_co2:.1f}")
+c1, c2, c3 = st.columns([1, 1, 2])
+with c1:
+    fecha_inicio = st.date_input("Desde", df_main['time'].min().date())
+with c2:
+    fecha_fin = st.date_input("Hasta", df_main['time'].max().date())
 
-        st.subheader("Tendencia de CO₂ Diario")
-        daily_avg_co2 = df_aire.set_index('time').resample('D')['co2'].mean().reset_index()
-        fig_co2_trend = px.line(daily_avg_co2, x='time', y='co2', title="Promedio Diario de CO₂", labels={'time': 'Fecha', 'co2': 'CO₂ (ppm)'})
-        st.plotly_chart(fig_co2_trend, use_container_width=True)
+# Filtrar el DataFrame por el rango de fechas seleccionado
+df_filtered = df_main[(df_main['time'].dt.date >= fecha_inicio) & (df_main['time'].dt.date <= fecha_fin)]
+
+# ================================
+# LAYOUT PRINCIPAL: GRÁFICO Y RESUMEN
+# ================================
+col_main, col_stats = st.columns([0.7, 0.3])
+
+with col_main:
+    st.subheader("Evolución de la Métrica Principal (CO₂)")
+    if not df_filtered.empty:
+        # Usamos el DataFrame filtrado por fecha para el gráfico
+        fig = px.line(df_filtered, x='time', y='object.co2', title="Niveles de CO₂ en el tiempo")
+        fig.update_layout(
+            yaxis_title="CO₂ (ppm)",
+            xaxis_title="Fecha",
+            yaxis=dict(range=[100, 1000]) # Rango Y como se pidió
+        )
+        st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("No hay datos de CO₂ para este período.")
+        st.info("No hay datos disponibles para el rango de fechas seleccionado.")
 
-with tab2:
-    st.header("Análisis de Ruido Ambiental")
-    df_ruido = df.dropna(subset=['LAeq'])
-    if not df_ruido.empty:
-        avg_ruido = df_ruido['LAeq'].mean()
-        st.metric("Ruido Promedio (dB)", f"{avg_ruido:.1f}")
+with col_stats:
+    st.markdown("<div class='resumen-title'>Resumen Estadístico</div>", unsafe_allow_html=True)
+    
+    if not df_filtered.empty:
+        min_val = df_filtered['object.co2'].min()
+        max_val = df_filtered['object.co2'].max()
+        mean_val = df_filtered['object.co2'].mean()
+        median_val = df_filtered['object.co2'].median()
 
-        st.subheader("Nivel de Ruido Promedio por Hora del Día")
-        df_ruido['hour'] = df_ruido['time'].dt.hour
-        hourly_avg_noise = df_ruido.groupby('hour')['LAeq'].mean().reset_index()
-        fig_noise_hourly = px.bar(hourly_avg_noise, x='hour', y='LAeq', title="Patrón de Ruido Diario", labels={'hour': 'Hora del Día', 'LAeq': 'Ruido Promedio (dB)'})
-        st.plotly_chart(fig_noise_hourly, use_container_width=True)
+        st.metric(label="Mínimo", value=f"{min_val:.2f} ppm")
+        st.metric(label="Máximo", value=f"{max_val:.2f} ppm")
+        st.metric(label="Promedio", value=f"{mean_val:.2f} ppm")
+        st.metric(label="Mediana", value=f"{median_val:.2f} ppm")
     else:
-        st.info("No hay datos de Ruido para este período.")
-
-with tab3:
-    st.header("Análisis de Sensores Soterrados")
-    df_sot = df.dropna(subset=['distance', 'status'])
-    if not df_sot.empty:
-        # Para el estado, tomamos el último registro de cada sensor
-        latest_status = df_sot.sort_values('time').drop_duplicates(subset=['device_name'], keep='last')
-        
-        st.subheader("Estado Actual de Contenedores")
-        status_counts = latest_status['status'].value_counts().reset_index()
-        status_counts.columns = ['status', 'count']
-        fig_status_pie = px.pie(status_counts, names='status', values='count', title="Distribución de Estado de Contenedores")
-        st.plotly_chart(fig_status_pie, use_container_width=True)
-    else:
-        st.info("No hay datos de sensores soterrados para este período.")
+        st.info("Sin datos para calcular estadísticas.")
