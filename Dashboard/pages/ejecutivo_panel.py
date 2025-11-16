@@ -1,7 +1,7 @@
 import streamlit as st
 from jwt_utils import verify_token
 
-st.set_page_config(page_title="Dashboard GAMC", page_icon="📊")
+st.set_page_config(page_title="Panel Ejecutivo", page_icon="📊")
 # 🔥 Ocultar completamente la sidebar de Streamlit
 hide_menu_style = """
 <style>
@@ -32,12 +32,12 @@ if decoded is None:
     st.session_state.clear()
     st.switch_page("pages/auth_app.py")
 
-# 🔑 Restringir a SOLO operador
-if decoded.get("role") != "operador":
-    st.error("Acceso exclusivo para operadores.")
+# 🔑 Verificar rol
+if decoded.get("role") != "ejecutivo":
+    st.error("Acceso denegado")
     st.stop()
 
-# Estilos botón logout
+# Estilos para botón logout
 st.markdown(
     """
 <style>
@@ -62,10 +62,10 @@ st.markdown(
 top_col1, top_col2 = st.columns([8, 2])
 with top_col2:
     st.markdown('<div class="top-bar">', unsafe_allow_html=True)
-    if st.button("🔒 Cerrar sesión", key="logout_operador"):
+    if st.button("🔒 Cerrar sesión", key="logout_ejecutivo"):
         st.session_state.clear()
         st.switch_page("pages/auth_app.py")
     st.markdown("</div>", unsafe_allow_html=True)
 
-st.title("📟 Dashboard Operador")
-st.info("Aquí va tu dashboard de operador (calidad de aire, sonido, soterrados, etc.)")
+st.title("📈 Panel Ejecutivo - Análisis Avanzado")
+st.info("Aquí luego conectamos ML, tendencias y análisis.")
