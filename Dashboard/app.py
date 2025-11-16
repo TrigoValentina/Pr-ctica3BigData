@@ -15,22 +15,31 @@ st.set_page_config(
 # porque el dashboard la necesita para el menú de navegación.
 
 # ================================
-# 🔐 VALIDACIÓN DE SESIÓN Y ROL
+# VALIDACIÓN DE SESIÓN SEGURA
 # ================================
-if "logged" not in st.session_state:
-    st.switch_page("pages/auth_app.py")
+session = st.session_state
 
-if "token" not in st.session_state:
-    st.session_state.clear()
-    st.switch_page("pages/auth_app.py")
+logged = session.get("logged", False)
+token = session.get("token", None)
 
-decoded = verify_token(st.session_state.get("token"))
+# 1️⃣  Si no está logeado → redirigir
+if not logged or token is None:
+    st.switch_page("pages/auth_app.py")
+    st.stop()
+
+# 2️⃣ Intentar decodificar token
+decoded = verify_token(token)
+
+# Token inválido o expirado
 if decoded is None:
-    st.session_state.clear()
+    session.clear()
     st.switch_page("pages/auth_app.py")
+    st.stop()
 
-if decoded["role"] != "operador":
-    st.error("Acceso exclusivo para operadores")
+# 3️⃣ Validar rol
+role_requerido = "operador"   # CAMBIAR por operador / ejecutivo
+if decoded.get("role") != role_requerido:
+    st.error("Acceso denegado.")
     st.stop()
 
 # ================================

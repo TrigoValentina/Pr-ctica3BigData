@@ -7,19 +7,40 @@ from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Panel Ejecutivo", page_icon="", layout="wide")
 
-# ================================
-# 🔐 VALIDACIÓN DE SESIÓN Y ROL
-# ================================
-if "logged" not in st.session_state:
-    st.switch_page("pages/auth_app.py")
+# Ocultar sidebar
+st.markdown("""
+<style>
+section[data-testid="stSidebar"] { display:none; }
+div[data-testid="stAppViewContainer"] { margin-left:0 !important; }
+</style>
+""", unsafe_allow_html=True)
 
-decoded = verify_token(st.session_state.get("token"))
+# ================================
+# VALIDACIÓN DE SESIÓN SEGURA
+# ================================
+session = st.session_state
+
+logged = session.get("logged", False)
+token = session.get("token", None)
+
+# 1️⃣  Si no está logeado → redirigir
+if not logged or token is None:
+    st.switch_page("pages/auth_app.py")
+    st.stop()
+
+# 2️⃣ Intentar decodificar token
+decoded = verify_token(token)
+
+# Token inválido o expirado
 if decoded is None:
-    st.session_state.clear()
+    session.clear()
     st.switch_page("pages/auth_app.py")
+    st.stop()
 
-if decoded["role"] != "ejecutivo":
-    st.error("Acceso exclusivo para ejecutivos.")
+# 3️⃣ Validar rol
+role_requerido = "ejecutivo"   # CAMBIAR por operador / ejecutivo
+if decoded.get("role") != role_requerido:
+    st.error("Acceso denegado.")
     st.stop()
 
 # ================================
