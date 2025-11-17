@@ -33,7 +33,7 @@ services:
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
     ports:
       - "7077:7077"
-      - "8080:8080"
+      - "18080:8080"
     environment:
       SPARK_MASTER_HOST: spark-master
       SPARK_HOME: /opt/spark
@@ -59,6 +59,19 @@ services:
       - ./app:/opt/spark/app
       - ./data:/opt/spark/data
 
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: 'Os51t=Ag/3=B'
+      MYSQL_DATABASE: emergentETLVALENTINA
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./sql:/docker-entrypoint-initdb.d
+    command: --default-authentication-plugin=mysql_native_password
+
   mongodb:
     image: mongo:6.0
     container_name: mongodb
@@ -69,5 +82,51 @@ services:
     volumes:
       - mongo_data:/data/db
 
+  # Consumer para EM310 Soterrados
+  spark-consumer-em310:
+    build: .
+    container_name: spark-consumer-em310
+    depends_on:
+      - kafka
+      - mysql
+      - spark-master
+    command: ["/opt/spark/bin/spark-submit", "--master", "local[2]", "/opt/spark/app/etl/spark_consumer_em310.py"]
+    volumes:
+      - ./app:/opt/spark/app
+      - ./data:/opt/spark/data
+    environment:
+      SPARK_HOME: /opt/spark
+
+  # Consumer para EM500 CO2
+  spark-consumer-em500:
+    build: .
+    container_name: spark-consumer-em500
+    depends_on:
+      - kafka
+      - mysql
+      - spark-master
+    command: ["/opt/spark/bin/spark-submit", "--master", "local[2]", "/opt/spark/app/etl/spark_consumer_em500.py"]
+    volumes:
+      - ./app:/opt/spark/app
+      - ./data:/opt/spark/data
+    environment:
+      SPARK_HOME: /opt/spark
+
+  # Consumer para WS302 Sonido
+  spark-consumer-ws302:
+    build: .
+    container_name: spark-consumer-ws302
+    depends_on:
+      - kafka
+      - mysql
+      - spark-master
+    command: ["/opt/spark/bin/spark-submit", "--master", "local[2]", "/opt/spark/app/etl/spark_consumer_ws302.py"]
+    volumes:
+      - ./app:/opt/spark/app
+      - ./data:/opt/spark/data
+    environment:
+      SPARK_HOME: /opt/spark
+
 volumes:
   mongo_data:
+  mysql_data:

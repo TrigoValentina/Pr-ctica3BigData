@@ -2,139 +2,632 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from kafka import KafkaConsumer
-import json
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import mysql.connector
+from pymongo import MongoClient
+import logging
+from datetime import datetime, timedelta
+import numpy as np
 
 # =============================
 # CONFIGURACIÓN DE PÁGINA
 # =============================
 st.set_page_config(
     page_title="Dashboard Ambiental - GAMC",
-    layout="wide"
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
 # =============================
-# CONFIGURACIÓN KAFKA
+# CONFIGURACIÓN DE LOGGING
 # =============================
-KAFKA_BROKER = "localhost:29092"
-TOPIC_NAME = "datos_sensores"
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # =============================
-# FUNCIONES
+# CONTROL DE ACCESO (LOGIN)
 # =============================
-@st.cache_data(ttl=5)  # Recarga cada 5 segundos
-def leer_datos_kafka(broker, max_mensajes=100):
-    """
-    Lee los últimos mensajes de Kafka desde el topic configurado.
-    """
-    try:
-        consumer = KafkaConsumer(
-            TOPIC_NAME,
-            bootstrap_servers=[broker],
-            auto_offset_reset='earliest',  # Desde el primer mensaje disponible
-            value_deserializer=lambda m: json.loads(m.decode('utf-8')),
-            consumer_timeout_ms=1000
-        )
-        registros = []
-        for i, msg in enumerate(consumer):
-            registros.append(msg.value)
-            if i >= max_mensajes - 1:
-                break
-        consumer.close()
+CREDENCIALES = {
+    "Oscar": "1234",
+    "Huicho": "1234"
+}
 
-        if registros:
-            # Normaliza JSON anidado
-            df = pd.json_normalize(registros)
-            # Convertir columna time a datetime
-            df['time'] = pd.to_datetime(df['time'])
-            # Ordenar por tiempo
-            df = df.sort_values('time')
-            return df
+if "is_authenticated" not in st.session_state:
+    st.session_state["is_authenticated"] = False
+    st.session_state["usuario_actual"] = None
+
+def mostrar_login():
+    st.title("🔐 Acceso al Dashboard Ambiental")
+    st.markdown("Por favor ingresa tus credenciales para continuar.")
+
+    with st.form("login_form"):
+        usuario = st.text_input("Usuario")
+        contrasena = st.text_input("Contraseña", type="password")
+        recordar = st.checkbox("Recordarme", value=False, help="Mantener la sesión activa mientras el navegador esté abierto.")
+        submit = st.form_submit_button("Ingresar")
+
+    if submit:
+        if usuario in CREDENCIALES and contrasena == CREDENCIALES[usuario]:
+            st.session_state["is_authenticated"] = True
+            st.session_state["usuario_actual"] = usuario
+            if recordar:
+                st.success("Sesión iniciada. Recargando panel...")
+            else:
+                st.info("Sesión iniciada. Recargando panel...")
+            st.rerun()
         else:
-            return pd.DataFrame()
+            st.error("Credenciales incorrectas. Inténtalo nuevamente.")
+
+if not st.session_state["is_authenticated"]:
+    mostrar_login()
+    st.stop()
+
+# Botón para cerrar sesión (Sidebar)
+def boton_logout():
+    if st.sidebar.button("🚪 Cerrar sesión"):
+        st.session_state["is_authenticated"] = False
+        st.session_state["usuario_actual"] = None
+        st.success("Sesión cerrada.")
+        st.rerun()
+
+# =============================
+# CONFIGURACIÓN DE BASES DE DATOS
+# =============================
+# MySQL
+DB_HOST = "localhost"
+DB_PORT = 3307  # Puerto mapeado en Docker
+DB_NAME = "emergentETLVALENTINA"
+DB_USER = "root"
+DB_PASSWORD = "Os51t=Ag/3=B"
+
+# MongoDB Atlas
+MONGO_ATLAS_URI = "mongodb+srv://jg012119:cEfOpibMb2iFfrCs@cluster0.oyerk.mongodb.net/emergentETLVALENTINA?retryWrites=true&w=majority&appName=Cluster0"
+MONGO_COLLECTION = "sensores"
+
+# =============================
+# FUNCIONES DE CONEXIÓN
+# =============================
+def get_mysql_connection():
+    """Crea una conexión a MySQL (sin cache para evitar problemas de conexión cerrada)"""
+    try:
+        logger.info(f"🔌 Intentando conectar a MySQL: {DB_HOST}:{DB_PORT}/{DB_NAME}")
+        conn = mysql.connector.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            database=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            autocommit=True
+        )
+        logger.info("✅ Conexión a MySQL establecida correctamente")
+        return conn
     except Exception as e:
-        st.error(f"Error al conectar con Kafka: {e}")
+        logger.error(f"❌ Error conectando a MySQL: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return None
+
+def leer_datos_mysql(tabla, use_cache=True):
+    """Lee datos de una tabla específica en MySQL"""
+    if use_cache:
+        return _leer_datos_mysql_cached(tabla)
+    else:
+        return _leer_datos_mysql_directo(tabla)
+
+@st.cache_data(ttl=60)  # Cache por 60 segundos
+def _leer_datos_mysql_cached(tabla):
+    """Versión con cache"""
+    return _leer_datos_mysql_directo(tabla)
+
+def _leer_datos_mysql_directo(tabla):
+    """Lee datos directamente sin cache"""
+    conn = None
+    try:
+        logger.info(f"📊 Intentando leer datos de la tabla: {tabla}")
+        conn = get_mysql_connection()
+        if conn is None:
+            logger.error("❌ No se pudo establecer conexión a MySQL")
+            st.error("❌ No se pudo conectar a MySQL. Verifica que el servicio esté corriendo.")
+            return pd.DataFrame()
+        
+        # Verificar que la conexión esté viva
+        if not conn.is_connected():
+            logger.error("❌ La conexión a MySQL no está activa")
+            st.error("❌ La conexión a MySQL no está activa. Intenta recargar.")
+            return pd.DataFrame()
+        
+        logger.info(f"✅ Conexión establecida, ejecutando query...")
+        query = f"SELECT * FROM `{tabla}` ORDER BY time DESC LIMIT 10000"
+        
+        # Usar pandas.read_sql directamente (más confiable)
+        df = pd.read_sql(query, conn)
+        
+        if not df.empty:
+            logger.info(f"📈 Datos leídos: {len(df)} registros")
+            logger.info(f"📋 Columnas encontradas: {list(df.columns)}")
+            if 'time' in df.columns:
+                df['time'] = pd.to_datetime(df['time'])
+                df = df.sort_values('time')
+            logger.info(f"✅ DataFrame preparado con {len(df)} filas")
+            st.success(f"✅ {len(df)} registros cargados de la tabla {tabla}")
+        else:
+            logger.warning(f"⚠️ La tabla {tabla} está vacía")
+            st.warning(f"⚠️ La tabla {tabla} está vacía")
+        
+        return df
+    except Exception as e:
+        logger.error(f"❌ Error leyendo datos de MySQL: {e}")
+        import traceback
+        error_trace = traceback.format_exc()
+        logger.error(error_trace)
+        st.error(f"❌ Error al leer datos: {e}")
+        st.code(error_trace)
         return pd.DataFrame()
+    finally:
+        # Siempre cerrar la conexión en el finally
+        if conn is not None and conn.is_connected():
+            conn.close()
+            logger.info("🔌 Conexión MySQL cerrada")
+
+@st.cache_data(ttl=60)
+def leer_todos_datos_mysql():
+    """Lee datos de todas las tablas y los combina"""
+    try:
+        tablas = ['em310_soterrados', 'em500_co2', 'ws302_sonido', 'otros']
+        dfs = []
+        
+        for tabla in tablas:
+            df = leer_datos_mysql(tabla)
+            if not df.empty:
+                df['tipo_sensor'] = tabla
+                dfs.append(df)
+        
+        if dfs:
+            return pd.concat(dfs, ignore_index=True)
+        return pd.DataFrame()
+    except Exception as e:
+        logger.error(f"Error combinando datos: {e}")
+        return pd.DataFrame()
+
+# =============================
+# FUNCIONES DE VISUALIZACIÓN
+# =============================
+def crear_grafico_evolucion_temporal(df, columna_y, titulo, color_by=None):
+    """Crea un gráfico de línea temporal"""
+    fig = px.line(
+        df,
+        x='time',
+        y=columna_y,
+        color=color_by if color_by else None,
+        title=titulo,
+        labels={
+            'time': 'Fecha',
+            columna_y: titulo.split('(')[-1].replace(')', '') if '(' in titulo else columna_y
+        }
+    )
+    fig.update_layout(
+        hovermode='x unified',
+        xaxis_title="Fecha",
+        yaxis_title=titulo,
+        height=400
+    )
+    return fig
+
+def crear_grafico_barras_promedio(df, columna_x, columna_y, titulo):
+    """Crea un gráfico de barras con promedios"""
+    promedios = df.groupby(columna_x)[columna_y].mean().reset_index()
+    promedios = promedios.sort_values(columna_y, ascending=False)
+    
+    fig = px.bar(
+        promedios,
+        x=columna_x,
+        y=columna_y,
+        title=titulo,
+        labels={columna_x: 'Sensor', columna_y: 'Promedio'},
+        color=columna_x,
+        color_discrete_sequence=px.colors.qualitative.Set3
+    )
+    fig.update_layout(
+        xaxis_title="Sensor",
+        yaxis_title="Nivel Promedio",
+        height=400,
+        showlegend=False
+    )
+    return fig
+
+def crear_boxplot_distribucion(df, columna_x, columna_y, titulo):
+    """Crea un box plot de distribución"""
+    fig = px.box(
+        df,
+        x=columna_x,
+        y=columna_y,
+        title=titulo,
+        labels={columna_x: 'Sensor', columna_y: 'Nivel'},
+        color=columna_x,
+        color_discrete_sequence=px.colors.qualitative.Set3
+    )
+    fig.update_layout(
+        xaxis_title="Sensor",
+        yaxis_title="Nivel",
+        height=400,
+        showlegend=False
+    )
+    return fig
+
+def crear_heatmap_hora_dia_semana(df, columna_valor):
+    """Crea un heatmap de hora del día vs día de la semana"""
+    # Crear copia para no modificar el original
+    df_heat = df.copy()
+    
+    # Extraer día de la semana y hora
+    df_heat['dia_semana'] = df_heat['time'].dt.day_name()
+    df_heat['hora'] = df_heat['time'].dt.hour
+    
+    # Mapear días de la semana a números (0=Lunes, 6=Domingo)
+    dias_orden = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    dias_espanol = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+    df_heat['dia_num'] = df_heat['dia_semana'].map({dia: i for i, dia in enumerate(dias_orden)})
+    
+    # Filtrar valores válidos
+    df_heat = df_heat[df_heat[columna_valor].notna() & df_heat['dia_num'].notna()]
+    
+    if df_heat.empty:
+        return None
+    
+    # Calcular promedio por hora y día
+    heatmap_data = df_heat.groupby(['dia_num', 'hora'])[columna_valor].mean().reset_index()
+    
+    # Crear pivot table
+    heatmap_pivot = heatmap_data.pivot(index='hora', columns='dia_num', values=columna_valor)
+    
+    # Asegurar que todas las horas (0-23) y días (0-6) estén presentes
+    horas_completas = pd.DataFrame({'hora': range(24)})
+    dias_completos = list(range(7))
+    
+    # Reindexar para incluir todas las horas
+    heatmap_pivot = heatmap_pivot.reindex(range(24))
+    
+    # Asegurar que todas las columnas de días estén presentes
+    for dia in dias_completos:
+        if dia not in heatmap_pivot.columns:
+            heatmap_pivot[dia] = np.nan
+    
+    # Reordenar columnas según días de la semana
+    heatmap_pivot = heatmap_pivot.reindex(columns=dias_completos)
+    heatmap_pivot.columns = dias_espanol
+    
+    # Crear el heatmap
+    fig = px.imshow(
+        heatmap_pivot,
+        labels=dict(x="Día de la Semana", y="Hora del Día", color="LAeq Promedio"),
+        title="1.4 Patrón de Ruido: Hora del Día vs. Día de la Semana",
+        color_continuous_scale='Blues',
+        aspect="auto",
+        text_auto='.1f'
+    )
+    fig.update_layout(
+        height=600,
+        xaxis_title="Día de la Semana",
+        yaxis_title="Hora del Día"
+    )
+    return fig
 
 # =============================
 # SIDEBAR
 # =============================
-st.sidebar.image("https://cdn-icons-png.flaticon.com/512/4149/4149670.png", width=110)
+st.sidebar.title("📊 Dashboard Ambiental")
+st.sidebar.markdown("---")
+st.sidebar.info(f"👤 Usuario: {st.session_state.get('usuario_actual', 'Desconocido')}")
+boton_logout()
+
 menu = st.sidebar.radio(
-    "📊 Selecciona una sección",
-    ["Calidad del Aire (EM500)", "Calidad del Sonido (WS302)", "Sensores Soterrados (EM310)"]
+    "Selecciona una sección",
+    [
+        "🔊 Calidad del Sonido (WS302)",
+        "🌫️ Calidad del Aire (EM500)",
+        "🌱 Sensores Soterrados (EM310)"
+    ]
 )
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### ⚙️ Configuración")
+auto_refresh = st.sidebar.checkbox("Auto-refrescar", value=False)
+if auto_refresh:
+    refresh_interval = st.sidebar.slider("Intervalo (segundos)", 5, 60, 10)
+    st.sidebar.info(f"🔄 Actualizando cada {refresh_interval}s")
+
+# Botón para limpiar cache
+if st.sidebar.button("🔄 Limpiar Cache y Recargar"):
+    st.cache_data.clear()
+    st.cache_resource.clear()
+    st.success("✅ Cache limpiado")
+    st.rerun()
+
+# Opción para deshabilitar cache
+sin_cache = st.sidebar.checkbox("🚫 Deshabilitar cache (más lento pero siempre actualizado)", value=False)
 
 # =============================
 # CARGA DE DATOS
 # =============================
-df = leer_datos_kafka(KAFKA_BROKER, max_mensajes=200)
+st.title("📊 Dashboard Ambiental - GAMC")
+st.markdown("---")
 
-if df.empty:
-    st.warning("No hay datos recientes de Kafka. Espera unos segundos...")
-else:
-    # =============================
-    # CALIDAD DEL AIRE
-    # =============================
-    if menu == "Calidad del Aire (EM500)":
-        st.markdown("## 🌫️ Calidad del Aire - EM500")
-
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("CO₂ Promedio (ppm)", f"{df['object.co2'].mean():.1f}")
-        col2.metric("Temperatura (°C)", f"{df['object.temperature'].mean():.1f}")
-        col3.metric("Humedad (%)", f"{df['object.humidity'].mean():.1f}")
-        col4.metric("Presión (hPa)", f"{df['object.pressure'].mean():.1f}")
-
-        st.markdown("### 📈 Evolución temporal")
-        fig_co2 = px.line(df, x='time', y='object.co2', title="CO₂ (ppm)", color_discrete_sequence=['#2196f3'])
-        st.plotly_chart(fig_co2, use_container_width=True)
-
-        fig_temp = px.line(df, x='time', y='object.temperature', title="Temperatura (°C)", color_discrete_sequence=['#e76f51'])
-        st.plotly_chart(fig_temp, use_container_width=True)
-
-        fig_hum = px.area(df, x='time', y='object.humidity', title="Humedad (%)", color_discrete_sequence=['#2a9d8f'])
-        st.plotly_chart(fig_hum, use_container_width=True)
-
-        fig_pres = px.line(df, x='time', y='object.pressure', title="Presión (hPa)", color_discrete_sequence=['#6a4c93'])
-        st.plotly_chart(fig_pres, use_container_width=True)
-
-    # =============================
-    # CALIDAD DEL SONIDO
-    # =============================
-    elif menu == "Calidad del Sonido (WS302)":
-        st.markdown("## 🔊 Calidad del Sonido - WS302")
-
-        # Algunos CSV usan 'object.noise' o 'object.laeq'
-        col_ruido = 'object.noise' if 'object.noise' in df.columns else 'object.laeq'
-
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Ruido Promedio (dB)", f"{df[col_ruido].mean():.1f}")
-        col2.metric("Nivel Máximo (dB)", f"{df[col_ruido].max():.1f}")
-        if 'object.battery' in df.columns:
-            col3.metric("Batería Promedio (%)", f"{df['object.battery'].mean():.1f}")
+# Mostrar indicador de carga
+with st.spinner("Cargando datos..."):
+    try:
+        if menu == "🔊 Calidad del Sonido (WS302)":
+            df = leer_datos_mysql('ws302_sonido', use_cache=not sin_cache)
+        elif menu == "🌫️ Calidad del Aire (EM500)":
+            df = leer_datos_mysql('em500_co2', use_cache=not sin_cache)
+        elif menu == "🌱 Sensores Soterrados (EM310)":
+            df = leer_datos_mysql('em310_soterrados', use_cache=not sin_cache)
         else:
-            col3.metric("Batería Promedio (%)", "N/A")
+            df = pd.DataFrame()
+        
+        # Debug: mostrar información en el sidebar
+        if st.sidebar.checkbox("🔍 Mostrar información de debug", value=False):
+            st.sidebar.write(f"**Tabla consultada:** {menu}")
+            st.sidebar.write(f"**Registros encontrados:** {len(df)}")
+            if not df.empty:
+                st.sidebar.write(f"**Columnas:** {list(df.columns)}")
+                st.sidebar.write(f"**Primera fecha:** {df['time'].min() if 'time' in df.columns else 'N/A'}")
+                st.sidebar.write(f"**Última fecha:** {df['time'].max() if 'time' in df.columns else 'N/A'}")
+    except Exception as e:
+        st.error(f"Error al cargar datos: {e}")
+        import traceback
+        st.code(traceback.format_exc())
+        df = pd.DataFrame()
 
-        st.markdown("### 🔊 Evolución del ruido")
-        fig_noise = px.line(df, x='time', y=col_ruido, title="Nivel de Ruido (dB)", color_discrete_sequence=['#0077b6'])
-        st.plotly_chart(fig_noise, use_container_width=True)
+# =============================
+# CALIDAD DEL SONIDO (WS302)
+# =============================
+if menu == "🔊 Calidad del Sonido (WS302)":
+    st.markdown("## 🔊 Calidad del Sonido - WS302")
+    
+    if df.empty:
+        st.warning("⚠️ No hay datos disponibles para sensores de sonido.")
+    else:
+        # Convertir columnas numéricas
+        if 'LAeq' in df.columns:
+            df['LAeq'] = pd.to_numeric(df['LAeq'], errors='coerce')
+        if 'LAI' in df.columns:
+            df['LAI'] = pd.to_numeric(df['LAI'], errors='coerce')
+        if 'LAImax' in df.columns:
+            df['LAImax'] = pd.to_numeric(df['LAImax'], errors='coerce')
+        
+        # Filtrar datos válidos
+        df_sonido = df[df['LAeq'].notna()].copy()
+        
+        if df_sonido.empty:
+            st.warning("⚠️ No hay datos válidos de LAeq.")
+        else:
+            # Métricas principales
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("LAeq Promedio (dB)", f"{df_sonido['LAeq'].mean():.1f}")
+            with col2:
+                st.metric("LAeq Máximo (dB)", f"{df_sonido['LAeq'].max():.1f}")
+            with col3:
+                st.metric("LAeq Mínimo (dB)", f"{df_sonido['LAeq'].min():.1f}")
+            with col4:
+                st.metric("Total Registros", len(df_sonido))
+            
+            st.markdown("---")
+            
+            # 1.1 Evolución del Nivel de Sonido Promedio (dB)
+            st.markdown("### 1.1 Evolución del Nivel de Sonido Promedio (dB)")
+            
+            # Usar tenant_name si existe, sino device_name
+            columna_sensor = 'tenant_name' if 'tenant_name' in df_sonido.columns else 'device_name'
+            
+            if columna_sensor in df_sonido.columns and df_sonido[columna_sensor].notna().any():
+                fig_evolucion = crear_grafico_evolucion_temporal(
+                    df_sonido,
+                    'LAeq',
+                    "Evolución del Nivel de Sonido Promedio (dB)",
+                    color_by=columna_sensor
+                )
+            else:
+                fig_evolucion = crear_grafico_evolucion_temporal(
+                    df_sonido,
+                    'LAeq',
+                    "Evolución del Nivel de Sonido Promedio (dB)"
+                )
+            st.plotly_chart(fig_evolucion, use_container_width=True)
+            
+            st.markdown("---")
+            
+            # 1.2 Nivel de Sonido Promedio por Sensor
+            st.markdown("### 1.2 Nivel de Sonido Promedio por Sensor")
+            
+            # Usar tenant_name si existe, sino device_name
+            columna_sensor = 'tenant_name' if 'tenant_name' in df_sonido.columns else 'device_name'
+            
+            if columna_sensor in df_sonido.columns and df_sonido[columna_sensor].notna().any():
+                fig_barras = crear_grafico_barras_promedio(
+                    df_sonido,
+                    columna_sensor,
+                    'LAeq',
+                    "Nivel de Sonido Promedio (LAeq) por Sensor"
+                )
+                st.plotly_chart(fig_barras, use_container_width=True)
+            else:
+                st.info("No hay información de sensor disponible")
+            
+            st.markdown("---")
+            
+            # 1.3 Distribución del Nivel de Sonido por Sensor
+            st.markdown("### 1.3 Distribución del Nivel de Sonido por Sensor")
+            
+            # Usar tenant_name si existe, sino device_name
+            columna_sensor = 'tenant_name' if 'tenant_name' in df_sonido.columns else 'device_name'
+            
+            if columna_sensor in df_sonido.columns and df_sonido[columna_sensor].notna().any():
+                fig_box = crear_boxplot_distribucion(
+                    df_sonido,
+                    columna_sensor,
+                    'LAeq',
+                    "Distribución del Nivel de Sonido por Sensor"
+                )
+                st.plotly_chart(fig_box, use_container_width=True)
+            else:
+                st.info("No hay información de sensor disponible")
+            
+            st.markdown("---")
+            
+            # 1.4 Patrón de Ruido: Hora del Día vs. Día de la Semana
+            st.markdown("### 1.4 Patrón de Ruido: Hora del Día vs. Día de la Semana")
+            
+            if len(df_sonido) > 0:
+                fig_heatmap = crear_heatmap_hora_dia_semana(df_sonido, 'LAeq')
+                if fig_heatmap is not None:
+                    st.plotly_chart(fig_heatmap, use_container_width=True)
+                else:
+                    st.info("No hay suficientes datos para el heatmap")
+            else:
+                st.info("No hay suficientes datos para el heatmap")
 
-    # =============================
-    # SENSORES SOTERRADOS
-    # =============================
-    elif menu == "Sensores Soterrados (EM310)":
-        st.markdown("## 🌱 Sensores Soterrados - EM310")
+# =============================
+# CALIDAD DEL AIRE (EM500)
+# =============================
+elif menu == "🌫️ Calidad del Aire (EM500)":
+    st.markdown("## 🌫️ Calidad del Aire - EM500")
+    
+    if df.empty:
+        st.warning("⚠️ No hay datos disponibles para sensores de calidad del aire.")
+    else:
+        # Convertir columnas numéricas
+        columnas_numericas = ['co2', 'temperature', 'humidity', 'pressure']
+        for col in columnas_numericas:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # Métricas principales
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            co2_prom = df['co2'].mean() if 'co2' in df.columns and df['co2'].notna().any() else 0
+            st.metric("CO₂ Promedio (ppm)", f"{co2_prom:.1f}")
+        with col2:
+            temp_prom = df['temperature'].mean() if 'temperature' in df.columns and df['temperature'].notna().any() else 0
+            st.metric("Temperatura Promedio (°C)", f"{temp_prom:.1f}")
+        with col3:
+            hum_prom = df['humidity'].mean() if 'humidity' in df.columns and df['humidity'].notna().any() else 0
+            st.metric("Humedad Promedio (%)", f"{hum_prom:.1f}")
+        with col4:
+            pres_prom = df['pressure'].mean() if 'pressure' in df.columns and df['pressure'].notna().any() else 0
+            st.metric("Presión Promedio (hPa)", f"{pres_prom:.1f}")
+        
+        st.markdown("---")
+        
+        # Evolución temporal de CO2
+        if 'co2' in df.columns and df['co2'].notna().any():
+            st.markdown("### 📈 Evolución Temporal de CO₂")
+            if 'device_name' in df.columns:
+                fig_co2 = crear_grafico_evolucion_temporal(
+                    df,
+                    'co2',
+                    "CO₂ (ppm)",
+                    color_by='device_name'
+                )
+            else:
+                fig_co2 = crear_grafico_evolucion_temporal(df, 'co2', "CO₂ (ppm)")
+            st.plotly_chart(fig_co2, use_container_width=True)
+        
+        # Gráficos en columnas
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if 'temperature' in df.columns and df['temperature'].notna().any():
+                st.markdown("### 🌡️ Temperatura")
+                fig_temp = crear_grafico_evolucion_temporal(df, 'temperature', "Temperatura (°C)")
+                st.plotly_chart(fig_temp, use_container_width=True)
+        
+        with col2:
+            if 'humidity' in df.columns and df['humidity'].notna().any():
+                st.markdown("### 💧 Humedad")
+                fig_hum = crear_grafico_evolucion_temporal(df, 'humidity', "Humedad (%)")
+                st.plotly_chart(fig_hum, use_container_width=True)
+        
+        # Presión
+        if 'pressure' in df.columns and df['pressure'].notna().any():
+            st.markdown("### 📊 Presión")
+            fig_pres = crear_grafico_evolucion_temporal(df, 'pressure', "Presión (hPa)")
+            st.plotly_chart(fig_pres, use_container_width=True)
 
+# =============================
+# SENSORES SOTERRADOS (EM310)
+# =============================
+elif menu == "🌱 Sensores Soterrados (EM310)":
+    st.markdown("## 🌱 Sensores Soterrados - EM310")
+    
+    if df.empty:
+        st.warning("⚠️ No hay datos disponibles para sensores soterrados.")
+    else:
+        # Convertir columnas numéricas
+        if 'distance' in df.columns:
+            df['distance'] = pd.to_numeric(df['distance'], errors='coerce')
+        
+        # Métricas principales
         col1, col2, col3 = st.columns(3)
-        col1.metric("Distancia Promedio (cm)", f"{df['object.distance'].mean():.1f}")
-        col2.metric("Batería Promedio (V)", f"{df['object.battery'].mean():.1f}")
-        col3.metric("Eventos Registrados", len(df))
-
-        st.markdown("### 📊 Evolución de distancia")
-        fig_dist = px.line(df, x='time', y='object.distance', title="Distancia (cm)", color_discrete_sequence=['#2a9d8f'])
-        st.plotly_chart(fig_dist, use_container_width=True)
-
-        if 'object.status' in df.columns:
-            st.markdown("### 📍 Estado de los sensores")
-            fig_status = px.pie(df, names='object.status', title="Estado de los Sensores", color_discrete_sequence=px.colors.qualitative.Safe)
+        with col1:
+            dist_prom = df['distance'].mean() if 'distance' in df.columns and df['distance'].notna().any() else 0
+            st.metric("Distancia Promedio (cm)", f"{dist_prom:.1f}")
+        with col2:
+            dist_max = df['distance'].max() if 'distance' in df.columns and df['distance'].notna().any() else 0
+            st.metric("Distancia Máxima (cm)", f"{dist_max:.1f}")
+        with col3:
+            st.metric("Total Registros", len(df))
+        
+        st.markdown("---")
+        
+        # Evolución temporal de distancia
+        if 'distance' in df.columns and df['distance'].notna().any():
+            st.markdown("### 📊 Evolución de Distancia")
+            if 'device_name' in df.columns:
+                fig_dist = crear_grafico_evolucion_temporal(
+                    df,
+                    'distance',
+                    "Distancia (cm)",
+                    color_by='device_name'
+                )
+            else:
+                fig_dist = crear_grafico_evolucion_temporal(df, 'distance', "Distancia (cm)")
+            st.plotly_chart(fig_dist, use_container_width=True)
+        
+        # Estado de los sensores
+        if 'status' in df.columns:
+            st.markdown("### 📍 Estado de los Sensores")
+            fig_status = px.pie(
+                df,
+                names='status',
+                title="Distribución de Estados",
+                color_discrete_sequence=px.colors.qualitative.Set3
+            )
             st.plotly_chart(fig_status, use_container_width=True)
+        
+        # Distribución por sensor
+        if 'device_name' in df.columns and 'distance' in df.columns:
+            st.markdown("### 📊 Distribución de Distancia por Sensor")
+            fig_box_dist = crear_boxplot_distribucion(
+                df,
+                'device_name',
+                'distance',
+                "Distribución de Distancia por Sensor"
+            )
+            st.plotly_chart(fig_box_dist, use_container_width=True)
+
+# =============================
+# FOOTER
+# =============================
+st.markdown("---")
+st.markdown("### 📝 Información del Sistema")
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.info(f"**Base de Datos:** {DB_NAME}")
+with col2:
+    st.info(f"**Última actualización:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+with col3:
+    if not df.empty:
+        st.info(f"**Registros mostrados:** {len(df)}")
