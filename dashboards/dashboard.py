@@ -146,25 +146,35 @@ def mostrar_login():
         if st.session_state["user_id"]:
             log_action(st.session_state["user_id"], "login", "info", {"username": user["username"]})
 
-rol = st.session_state["user_role"]
+# rol = st.session_state["user_role"]
 
-# Si es EJECUTIVO → abrir dashboard2
-if rol == "ejecutivo":
-    st.success("Inicio de sesión exitoso ✔ (Ejecutivo)")
-    dashboard2.main()
+# # Si es EJECUTIVO → abrir dashboard2
+# if rol == "ejecutivo":
+#     st.success("Inicio de sesión exitoso ✔ (Ejecutivo)")
+#     dashboard2.main()
+#     st.stop()
+
+# # Si es OPERADOR → dashboard normal
+# elif rol == "operador":
+#     st.success("Inicio de sesión exitoso ✔ (Operador)")
+#     st.rerun()
+
+# # Cualquier otro rol también se queda en dashboard normal
+# else:
+#     st.success("Inicio de sesión exitoso ✔")
+#     st.rerun()
+
+# Si no está autenticado → mostrar login
+if not st.session_state["is_authenticated"]:
+    mostrar_login()
     st.stop()
 
-# Si es OPERADOR → dashboard normal
-elif rol == "operador":
-    st.success("Inicio de sesión exitoso ✔ (Operador)")
-    st.rerun()
+# Si está autenticado, decidir qué dashboard mostrar según el rol
+rol = st.session_state.get("user_role", "sin rol")
 
-# Cualquier otro rol también se queda en dashboard normal
-else:
-    st.success("Inicio de sesión exitoso ✔")
-    st.rerun()
-
-
+if rol == "ejecutivo":
+    dashboard2.main()
+    st.stop()
 
 def boton_logout():
     """Botón para cerrar sesión, en el sidebar."""

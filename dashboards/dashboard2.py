@@ -10,7 +10,7 @@ import numpy as np
 # MAIN FUNCTION (NECESARIA PARA EJECUTARLO DESDE dashboard.py)
 # =========================================================
 def main():
-    from dashboards.dashboard import leer_datos_mysql
+    from dashboards.shared import leer_datos_mysql
 
     # =========================================================
     # CONFIG
