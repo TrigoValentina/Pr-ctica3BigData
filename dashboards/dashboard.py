@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 import numpy as np
 import bcrypt
 from supabase import create_client, Client
+import dashboards.dashboard2 as dashboard2
 
 # =============================
 # CONFIGURACIÓN DE PÁGINA
@@ -142,8 +143,24 @@ def mostrar_login():
         if st.session_state["user_id"]:
             log_action(st.session_state["user_id"], "login", "info", {"username": user["username"]})
 
-        st.success("Inicio de sesión exitoso ✔")
-        st.rerun()
+rol = st.session_state["user_role"]
+
+# Si es EJECUTIVO → abrir dashboard2
+if rol == "ejecutivo":
+    st.success("Inicio de sesión exitoso ✔ (Ejecutivo)")
+    dashboard2.main()
+    st.stop()
+
+# Si es OPERADOR → dashboard normal
+elif rol == "operador":
+    st.success("Inicio de sesión exitoso ✔ (Operador)")
+    st.rerun()
+
+# Cualquier otro rol también se queda en dashboard normal
+else:
+    st.success("Inicio de sesión exitoso ✔")
+    st.rerun()
+
 
 
 def boton_logout():
