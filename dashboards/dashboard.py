@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 import numpy as np
 import bcrypt
 from supabase import create_client, Client
-import dashboards.dashboard2 as dashboard2
+from dashboards import dashboard2
 
 # =============================
 # CONFIGURACIÓN DE PÁGINA

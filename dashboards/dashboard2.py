@@ -5,12 +5,12 @@ from datetime import datetime
 import numpy as np
 
 # IMPORTANT: Importa la función que ya tienes en dashboard
-from dashboard import leer_datos_mysql
 
 # =========================================================
 # MAIN FUNCTION (NECESARIA PARA EJECUTARLO DESDE dashboard.py)
 # =========================================================
 def main():
+    from dashboards.dashboard import leer_datos_mysql
 
     # =========================================================
     # CONFIG
