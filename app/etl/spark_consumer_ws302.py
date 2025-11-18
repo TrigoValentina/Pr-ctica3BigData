@@ -87,10 +87,18 @@ def procesar_lote(batch_df, batch_id):
                 tenant_name = data.get("deviceInfo", {}).get("tenantName", "")
                 address = data.get("deviceInfo", {}).get("tags", {}).get("Address", "")
                 location = data.get("deviceInfo", {}).get("tags", {}).get("Location", "")
-                LAeq = object_data.get("LAeq", "")
-                LAI = object_data.get("LAI", "")
-                LAImax = object_data.get("LAImax", "")
+                LAeq = object_data.get("LAeq")
+                LAI = object_data.get("LAI")
+                LAImax = object_data.get("LAImax")
                 status = object_data.get("status", "")
+                
+                # Validar que al menos uno de los campos principales tenga valor (no null)
+                has_valid_LAeq = LAeq is not None and LAeq != "" and str(LAeq).lower() != "null"
+                has_valid_LAI = LAI is not None and LAI != "" and str(LAI).lower() != "null"
+                has_valid_LAImax = LAImax is not None and LAImax != "" and str(LAImax).lower() != "null"
+                
+                if not (has_valid_LAeq or has_valid_LAI or has_valid_LAImax):
+                    continue
                 
                 # Insertar en MySQL
                 insert_sql = f"""
@@ -100,19 +108,26 @@ def procesar_lote(batch_df, batch_id):
                 cursor.execute(insert_sql, (time_val, tenant_name, address, location, LAeq, LAI, LAImax, status))
                 registros_guardados += 1
                 
-                # Insertar en MongoDB
+                # Insertar en MongoDB (solo campos con valores, sin null)
                 mongo_doc = {
                     "tipo": "WS302",
                     "time": time_val,
-                    "tenant_name": tenant_name,
-                    "Address": address,
-                    "Location": location,
-                    "LAeq": LAeq,
-                    "LAI": LAI,
-                    "LAImax": LAImax,
-                    "status": status,
                     "batch_id": batch_id
                 }
+                if tenant_name and tenant_name != "":
+                    mongo_doc["tenant_name"] = tenant_name
+                if address and address != "":
+                    mongo_doc["Address"] = address
+                if location and location != "":
+                    mongo_doc["Location"] = location
+                if has_valid_LAeq:
+                    mongo_doc["LAeq"] = LAeq
+                if has_valid_LAI:
+                    mongo_doc["LAI"] = LAI
+                if has_valid_LAImax:
+                    mongo_doc["LAImax"] = LAImax
+                if status and status != "":
+                    mongo_doc["status"] = status
                 mongo_collection.insert_one(mongo_doc)
                 
             except Exception as e:

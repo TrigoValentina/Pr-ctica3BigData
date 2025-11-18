@@ -92,18 +92,27 @@ def procesar_lote(batch_df, batch_id):
                 address = data.get("deviceInfo", {}).get("tags", {}).get("Address", "")
                 location = data.get("deviceInfo", {}).get("tags", {}).get("Location", "")
                 
-                co2 = object_data.get("co2", "")
+                co2 = object_data.get("co2")
                 co2_status = object_data.get("co2_status", "")
                 co2_message = object_data.get("co2_message", "")
-                temperature = object_data.get("temperature", "")
+                temperature = object_data.get("temperature")
                 temperature_status = object_data.get("temperature_status", "")
                 temperature_message = object_data.get("temperature_message", "")
-                humidity = object_data.get("humidity", "")
+                humidity = object_data.get("humidity")
                 humidity_status = object_data.get("humidity_status", "")
                 humidity_message = object_data.get("humidity_message", "")
-                pressure = object_data.get("pressure", "")
+                pressure = object_data.get("pressure")
                 pressure_status = object_data.get("pressure_status", "")
                 pressure_message = object_data.get("pressure_message", "")
+                
+                # Validar que al menos uno de los campos principales tenga valor (no null)
+                has_valid_co2 = co2 is not None and co2 != "" and str(co2).lower() != "null"
+                has_valid_temp = temperature is not None and temperature != "" and str(temperature).lower() != "null"
+                has_valid_hum = humidity is not None and humidity != "" and str(humidity).lower() != "null"
+                has_valid_press = pressure is not None and pressure != "" and str(pressure).lower() != "null"
+                
+                if not (has_valid_co2 or has_valid_temp or has_valid_hum or has_valid_press):
+                    continue
                 
                 # Insertar en MySQL
                 insert_sql = f"""
@@ -125,19 +134,26 @@ def procesar_lote(batch_df, batch_id):
                 ))
                 registros_guardados += 1
                 
-                # Insertar en MongoDB
+                # Insertar en MongoDB (solo campos con valores, sin null)
                 mongo_doc = {
                     "tipo": "EM500",
                     "time": time_val,
-                    "device_name": device_name,
-                    "Address": address,
-                    "Location": location,
-                    "co2": co2,
-                    "temperature": temperature,
-                    "humidity": humidity,
-                    "pressure": pressure,
                     "batch_id": batch_id
                 }
+                if device_name and device_name != "":
+                    mongo_doc["device_name"] = device_name
+                if address and address != "":
+                    mongo_doc["Address"] = address
+                if location and location != "":
+                    mongo_doc["Location"] = location
+                if has_valid_co2:
+                    mongo_doc["co2"] = co2
+                if has_valid_temp:
+                    mongo_doc["temperature"] = temperature
+                if has_valid_hum:
+                    mongo_doc["humidity"] = humidity
+                if has_valid_press:
+                    mongo_doc["pressure"] = pressure
                 mongo_collection.insert_one(mongo_doc)
                 
             except Exception as e:

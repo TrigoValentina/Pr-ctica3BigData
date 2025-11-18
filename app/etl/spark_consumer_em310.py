@@ -85,6 +85,12 @@ def procesar_lote(batch_df, batch_id):
                 distance = data.get("object", {}).get("distance", "")
                 status = data.get("object", {}).get("status", "")
                 
+                # Validar que distance y status no sean null/vacíos
+                if distance is None or distance == "" or str(distance).lower() == "null":
+                    continue
+                if status is None or status == "" or str(status).lower() == "null":
+                    continue
+                
                 # Insertar en MySQL
                 insert_sql = f"""
                     INSERT INTO `{TABLA}` (time, device_name, Address, Location, distance, status)
@@ -93,17 +99,22 @@ def procesar_lote(batch_df, batch_id):
                 cursor.execute(insert_sql, (time_val, device_name, address, location, distance, status))
                 registros_guardados += 1
                 
-                # Insertar en MongoDB
+                # Insertar en MongoDB (solo campos con valores, sin null)
                 mongo_doc = {
                     "tipo": "EM310",
                     "time": time_val,
-                    "device_name": device_name,
-                    "Address": address,
-                    "Location": location,
-                    "distance": distance,
-                    "status": status,
                     "batch_id": batch_id
                 }
+                if device_name and device_name != "":
+                    mongo_doc["device_name"] = device_name
+                if address and address != "":
+                    mongo_doc["Address"] = address
+                if location and location != "":
+                    mongo_doc["Location"] = location
+                if distance and distance != "":
+                    mongo_doc["distance"] = distance
+                if status and status != "":
+                    mongo_doc["status"] = status
                 mongo_collection.insert_one(mongo_doc)
                 
             except Exception as e:
