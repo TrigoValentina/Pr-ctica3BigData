@@ -143,25 +143,6 @@ def mostrar_login():
         if st.session_state["user_id"]:
             log_action(st.session_state["user_id"], "login", "info", {"username": user["username"]})
 
-rol = st.session_state["user_role"]
-
-# Si es EJECUTIVO → abrir dashboard2
-if rol == "ejecutivo":
-    st.success("Inicio de sesión exitoso ✔ (Ejecutivo)")
-    dashboard2.main()
-    st.stop()
-
-# Si es OPERADOR → dashboard normal
-elif rol == "operador":
-    st.success("Inicio de sesión exitoso ✔ (Operador)")
-    st.rerun()
-
-# Cualquier otro rol también se queda en dashboard normal
-else:
-    st.success("Inicio de sesión exitoso ✔")
-    st.rerun()
-
-
 
 def boton_logout():
     """Botón para cerrar sesión, en el sidebar."""
@@ -178,6 +159,16 @@ def boton_logout():
 if not st.session_state["is_authenticated"]:
     mostrar_login()
     st.stop()
+# =============================
+# REDIRECCIÓN POR ROL
+# =============================
+rol = st.session_state["user_role"]
+
+if rol == "ejecutivo":
+    dashboard2.main()
+    st.stop()
+
+# operador y otros roles continúan al dashboard normal
 
 # =============================
 # CONFIGURACIÓN DE BASES DE DATOS (MySQL + Mongo)
