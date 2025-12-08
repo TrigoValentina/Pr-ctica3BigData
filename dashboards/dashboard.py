@@ -33,6 +33,118 @@ logger = logging.getLogger(__name__)
 # =============================
 # 🔗 SUPABASE (USUARIOS + LOGS)
 # =============================
+SUPABASE_URL = "https://ugqhpqllxrcjyusslasg.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVncWhwcWxseHJjanl1c3NsYXNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMyNDE0NDgsImV4cCI6MjA3ODgxNzQ0OH0.bwVIZf6bCqL1cuYZwFvwgysLZvDv2LzyvgxcLEpDA0U"  # anon key
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+
+def get_user_by_username(username: str):
+    """Busca usuario en Supabase por username."""
+    try:
+        res = (
+            supabase
+            .table("app_users")
+            .select("*")
+            .eq("username", username)
+            .execute()
+        )
+        if res.data:
+            return res.data[0]
+        return None
+    except Exception as e:
+        logger.error(f"Error obteniendo usuario '{username}' desde Supabase: {e}")
+        return None
+
+
+def log_action(user_id, action: str, level: str = "info", data: dict | None = None):
+    """Registra acción en app_logs de Supabase."""
+    try:
+        payload = {
+            "user_id": user_id,
+            "action": action,
+            "level": level,
+            "data": data or {},
+        }
+        supabase.table("app_logs").insert(payload).execute()
+    except Exception as e:
+        logger.error(f"Error registrando log en Supabase: {e}")
+
+
+# =============================
+# CONTROL DE ACCESO (LOGIN)
+# =============================
+
+# Inicializar estado de sesión
+if "is_authenticated" not in st.session_state:
+    st.session_state["is_authenticated"] = False
+if "usuario_actual" not in st.session_state:
+    st.session_state["usuario_actual"] = None
+if "user_role" not in st.session_state:
+    st.session_state["user_role"] = None
+if "user_id" not in st.session_state:
+    st.session_state["user_id"] = None
+
+def mostrar_login():
+    st.title("🔐 Sistema GAMC - Inicio de Sesión")
+    st.markdown("Por favor ingresa tus credenciales para acceder al dashboard.")
+
+    with st.form("login_form"):
+        usuario = st.text_input("Usuario")
+        contrasena = st.text_input("Contraseña", type="password")
+        recordar = st.checkbox(
+            "Recordarme",
+            value=True,
+            help="Mantener la sesión activa mientras el navegador esté abierto."
+        )
+        submit = st.form_submit_button("Ingresar")
+
+    if submit:
+        if not usuario or not contrasena:
+            st.error("Por favor ingresa usuario y contraseña.")
+            return
+
+        user = get_user_by_username(usuario)
+
+        if not user:
+            st.error("Usuario o contraseña incorrectos.")
+            return
+
+        # Validar que esté activo
+        if user.get("is_active") is False:
+            st.error("Tu usuario está inactivo. Contacta con el administrador.")
+            return
+
+        password_hash = user.get("password_hash")
+
+        if not password_hash:
+            st.error("Tu usuario no tiene contraseña configurada. Contacta al administrador.")
+            return
+
+        try:
+            ok = bcrypt.checkpw(
+                contrasena.encode("utf-8"),
+                password_hash.encode("utf-8")
+            )
+        except Exception:
+            ok = False
+
+        if not ok:
+            st.error("Usuario o contraseña incorrectos.")
+            return
+
+        # ✅ Login correcto: guardar sesión
+        st.session_state["is_authenticated"] = True
+        st.session_state["usuario_actual"] = user["username"]
+        st.session_state["user_role"] = user.get("role", "sin rol")
+        st.session_state["user_id"] = user.get("id")
+
+        # Registrar en logs
+        if st.session_state["user_id"]:
+            log_action(st.session_state["user_id"], "login", "info", {"username": user["username"]})
+        
+        st.success("Inicio de sesión exitoso ✔")
+        st.rerun()
 
 if not st.session_state["is_authenticated"]:
     mostrar_login()
@@ -93,60 +205,6 @@ def leer_datos_mysql(tabla, use_cache=True):
     else:
         return _leer_datos_mysql_directo(tabla)
 
-@st.cache_data(ttl=60)  # Cache por 60 segundos
-def _leer_datos_mysql_cached(tabla):
-    """Versión con cache"""
-    return _leer_datos_mysql_directo(tabla)
-
-def _leer_datos_mysql_directo(tabla):
-    """Lee datos directamente sin cache"""
-    conn = None
-    try:
-        logger.info(f"📊 Intentando leer datos de la tabla: {tabla}")
-        conn = get_mysql_connection()
-        if conn is None:
-            logger.error("❌ No se pudo establecer conexión a MySQL")
-            st.error("❌ No se pudo conectar a MySQL. Verifica que el servicio esté corriendo.")
-            return pd.DataFrame()
-        
-        # Verificar que la conexión esté viva
-        if not conn.is_connected():
-            logger.error("❌ La conexión a MySQL no está activa")
-            st.error("❌ La conexión a MySQL no está activa. Intenta recargar.")
-            return pd.DataFrame()
-        
-        logger.info(f"✅ Conexión establecida, ejecutando query...")
-        query = f"SELECT * FROM `{tabla}` ORDER BY time DESC LIMIT 10000"
-        
-        # Usar pandas.read_sql directamente (más confiable)
-        df = pd.read_sql(query, conn)
-        
-        if not df.empty:
-            logger.info(f"📈 Datos leídos: {len(df)} registros")
-            logger.info(f"📋 Columnas encontradas: {list(df.columns)}")
-            if 'time' in df.columns:
-                df['time'] = pd.to_datetime(df['time'])
-                df = df.sort_values('time')
-            logger.info(f"✅ DataFrame preparado con {len(df)} filas")
-            st.success(f"✅ {len(df)} registros cargados de la tabla {tabla}")
-        else:
-            logger.warning(f"⚠️ La tabla {tabla} está vacía")
-            st.warning(f"⚠️ La tabla {tabla} está vacía")
-        
-        return df
-    except Exception as e:
-        logger.error(f"❌ Error leyendo datos de MySQL: {e}")
-        import traceback
-        error_trace = traceback.format_exc()
-        logger.error(error_trace)
-        st.error(f"❌ Error al leer datos: {e}")
-        st.code(error_trace)
-        return pd.DataFrame()
-    finally:
-        # Siempre cerrar la conexión en el finally
-        if conn is not None and conn.is_connected():
-            conn.close()
-            logger.info("🔌 Conexión MySQL cerrada")
 
 @st.cache_data(ttl=60)
 def leer_todos_datos_mysql():
