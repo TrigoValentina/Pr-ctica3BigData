@@ -205,6 +205,60 @@ def leer_datos_mysql(tabla, use_cache=True):
     else:
         return _leer_datos_mysql_directo(tabla)
 
+@st.cache_data(ttl=60)  # Cache por 60 segundos
+def _leer_datos_mysql_cached(tabla):
+    """Versión con cache"""
+    return _leer_datos_mysql_directo(tabla)
+
+def _leer_datos_mysql_directo(tabla):
+    """Lee datos directamente sin cache"""
+    conn = None
+    try:
+        logger.info(f"📊 Intentando leer datos de la tabla: {tabla}")
+        conn = get_mysql_connection()
+        if conn is None:
+            logger.error("❌ No se pudo establecer conexión a MySQL")
+            st.error("❌ No se pudo conectar a MySQL. Verifica que el servicio esté corriendo.")
+            return pd.DataFrame()
+        
+        # Verificar que la conexión esté viva
+        if not conn.is_connected():
+            logger.error("❌ La conexión a MySQL no está activa")
+            st.error("❌ La conexión a MySQL no está activa. Intenta recargar.")
+            return pd.DataFrame()
+        
+        logger.info(f"✅ Conexión establecida, ejecutando query...")
+        query = f"SELECT * FROM `{tabla}` ORDER BY time DESC LIMIT 10000"
+        
+        # Usar pandas.read_sql directamente (más confiable)
+        df = pd.read_sql(query, conn)
+        
+        if not df.empty:
+            logger.info(f"📈 Datos leídos: {len(df)} registros")
+            logger.info(f"📋 Columnas encontradas: {list(df.columns)}")
+            if 'time' in df.columns:
+                df['time'] = pd.to_datetime(df['time'])
+                df = df.sort_values('time')
+            logger.info(f"✅ DataFrame preparado con {len(df)} filas")
+            st.success(f"✅ {len(df)} registros cargados de la tabla {tabla}")
+        else:
+            logger.warning(f"⚠️ La tabla {tabla} está vacía")
+            st.warning(f"⚠️ La tabla {tabla} está vacía")
+        
+        return df
+    except Exception as e:
+        logger.error(f"❌ Error leyendo datos de MySQL: {e}")
+        import traceback
+        error_trace = traceback.format_exc()
+        logger.error(error_trace)
+        st.error(f"❌ Error al leer datos: {e}")
+        st.code(error_trace)
+        return pd.DataFrame()
+    finally:
+        # Siempre cerrar la conexión en el finally
+        if conn is not None and conn.is_connected():
+            conn.close()
+            logger.info("🔌 Conexión MySQL cerrada")
 
 @st.cache_data(ttl=60)
 def leer_todos_datos_mysql():
