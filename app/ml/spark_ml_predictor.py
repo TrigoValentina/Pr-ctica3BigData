@@ -152,7 +152,30 @@ class MLPredictor:
             device_last_values[device] = last_val if last_val else 0
         
         # Crear DataFrame de predicción para cada dispositivo
-
+        predictions_data = []
+        
+        for device in devices[:3]:  # Limitar a 3 dispositivos para no sobrecargar
+            last_val = device_last_values.get(device, 0)
+            
+            for dt in future_dates:
+                predictions_data.append({
+                    "device_name": device,
+                    "time": dt,
+                    "hour": dt.hour,
+                    "day_of_week": dt.isoweekday(),
+                    "month": dt.month,
+                    "device_index": 0.0,  # Simplificado
+                    f"{target_metric}_lag1": last_val,
+                    f"{target_metric}_lag2": last_val,
+                    f"{target_metric}_lag3": last_val
+                })
+        
+        if not predictions_data:
+            logger.warning("⚠️ No se generaron datos de predicción")
+            return
+        
+        future_df = self.spark.createDataFrame(predictions_data)
+        
         # Realizar predicción
         predictions = model.transform(future_df)
         
