@@ -1,0 +1,102 @@
+import os
+import json
+import time
+import logging
+from kafka import KafkaProducer
+import pandas as pd
+from datetime import datetime, timezone
+from pathlib import Path
+import traceback
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+logger.info("=" * 80)
+logger.info("🚀 PRODUCTOR KAFKA - EM310 SOTERRADOS")
+logger.info("=" * 80)
+
+KAFKA_BROKER = 'kafka:9092'
+KAFKA_TOPIC = 'datos_sensores'
+data_folder = Path("/opt/spark/data")
+archivo = "EM310-UDL-915M soterrados nov 2024.csv"
+
+columnas_por_csv = {
+    "EM310-UDL-915M soterrados nov 2024.csv": [
+        "time",
+        "deviceInfo.deviceName",
+        "deviceInfo.tags.Address",
+        "deviceInfo.tags.Location",
+        "object.distance",
+        "object.status"
+    ]
+}
+
+try:
+    producer = KafkaProducer(
+        bootstrap_servers=[KAFKA_BROKER],
+        value_serializer=lambda v: json.dumps(v, ensure_ascii=False, default=str).encode('utf-8'),
+        api_version=(0, 10, 1)
+    )
+    logger.info("✅ Productor Kafka creado")
+except Exception as e:
+    logger.error(f"❌ Error al crear productor: {e}")
+    raise
+
+csv_path = data_folder / archivo
+logger.info(f"📄 Procesando: {archivo}")
+logger.info(f"📁 Ruta: {csv_path}")
+
+if not csv_path.exists():
+    logger.error(f"❌ Archivo no encontrado: {csv_path}")
+    exit(1)
+
+df = pd.read_csv(csv_path, low_memory=False)
+df = df.dropna(how="all")
+total_filas = len(df)
+logger.info(f"📊 Total filas: {total_filas}")
+
+columnas_filtradas = columnas_por_csv.get(archivo, [])
+registros_enviados = 0
+
+for i, row in df.iterrows():
+    try:
+        data = {}
+        for col in columnas_filtradas:
+            if col in df.columns:
+                valor = row[col]
+                if pd.isna(valor):
+                    continue
+                parts = col.split(".")
+                ref = data
+                for p in parts[:-1]:
+                    if p not in ref:
+                        ref[p] = {}
+                    ref = ref[p]
+                ref[parts[-1]] = valor
+
+        if "time" not in data or pd.isna(data.get("time")):
+            data["time"] = datetime.now(timezone.utc).isoformat()
+        elif isinstance(data.get("time"), pd.Timestamp):
+            data["time"] = data["time"].isoformat()
+
+        if not data:
+            continue
+
+        future = producer.send(KAFKA_TOPIC, value=data)
+        record_metadata = future.get(timeout=10)
+        registros_enviados += 1
+        
+        if registros_enviados % 1000 == 0:
+            logger.info(f"📨 {registros_enviados}/{total_filas} registros enviados")
+
+    except Exception as e:
+        logger.error(f"❌ Error en fila {i+1}: {e}")
+        continue
+
+producer.flush()
+logger.info(f"✅ Completado: {registros_enviados}/{total_filas} registros enviados")
+
