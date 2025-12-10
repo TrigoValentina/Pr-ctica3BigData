@@ -21,7 +21,8 @@ from pyspark.ml.evaluation import MulticlassClassificationEvaluator
 from pyspark.ml import Pipeline
 from pyspark.mllib.evaluation import MulticlassMetrics
 import mysql.connector
-
+from pyspark.sql.functions import udf
+from pyspark.sql.types import DoubleType
 # Importar configuración
 sys.path.append('/opt/spark/app')
 from ml.ml_config import (
@@ -35,6 +36,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+get_confidence_udf = udf(lambda probs: float(max(probs)), DoubleType())
 
 class ClassificationTrainer:
     def __init__(self):
@@ -383,38 +385,39 @@ class ClassificationTrainer:
         
         try:
             device_col = self.config['device_column']
-            
-            # UDF para mapear predicción a nombre de clase
+
+            # UDF local para mapear predicción (0/1/2) → nombre de clase
             def get_class_name(pred_val):
                 pred_int = int(pred_val)
                 return self.config['classes'].get(pred_int, "Desconocido")
-            
+
             get_class_name_udf = udf(get_class_name, StringType())
-            
+
             pred_df = predictions.select(
                 lit(self.sensor_type).alias("sensor_type"),
                 col(device_col).alias("device_name"),
                 col("time"),
                 col("class_name").alias("real_class"),
                 get_class_name_udf(col("prediction")).alias("predicted_class"),
-                lit(1.0).alias("confidence"),  # TODO: Extraer probabilidad real del modelo
+                get_confidence_udf(col("probability")).alias("confidence"),
                 lit(self.model_version).alias("model_version")
             )
-            
+
             # Guardar en MySQL
             jdbc_url = get_jdbc_url()
             db_props = get_db_properties()
-            
+
             pred_df.write.jdbc(
                 url=jdbc_url,
                 table="ml_predictions_classification",
                 mode="append",
                 properties=db_props
             )
-            
+
             logger.info(f"✅ {pred_df.count()} predicciones guardadas")
         except Exception as e:
             logger.error(f"❌ Error guardando predicciones: {e}")
+
     
     def run(self):
         """Ejecuta el flujo completo de entrenamiento"""
