@@ -1,0 +1,1 @@
+{"class":"org.apache.spark.ml.feature.VectorAssembler","timestamp":1765341444397,"sparkVersion":"3.5.3","uid":"VectorAssembler_8857866f5d71","paramMap":{"outputCol":"features","inputCols":["hour","day_of_week","month","device_index","LAI_lag1","LAI_lag2","LAI_lag3"]},"defaultParamMap":{"outputCol":"VectorAssembler_8857866f5d71__output","handleInvalid":"error"}}

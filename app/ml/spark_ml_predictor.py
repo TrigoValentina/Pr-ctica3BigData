@@ -266,12 +266,13 @@ class MLPredictor:
         map_class_udf = udf(map_class, StringType())
         
         pred_df = predictions.select(
-            lit(sensor_type).alias("sensor_type"),
+            lit(self.sensor_type).alias("sensor_type"),
             col("device_name"),
             col("time"),
             lit(None).cast("string").alias("real_class"),
             map_class_udf(col("prediction")).alias("predicted_class"),
-            lit(1.0).alias("confidence"),
+            # Extract max probability as confidence
+            udf(lambda v: float(max(v)), "double")(col("probability")).alias("confidence"),
             lit(model_version).alias("model_version")
         )
         

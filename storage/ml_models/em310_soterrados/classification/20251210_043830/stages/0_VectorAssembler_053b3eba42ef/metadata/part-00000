@@ -1,0 +1,1 @@
+{"class":"org.apache.spark.ml.feature.VectorAssembler","timestamp":1765341536928,"sparkVersion":"3.5.3","uid":"VectorAssembler_053b3eba42ef","paramMap":{"inputCols":["distance","status_encoded","hour","day_of_week","month","device_index"],"outputCol":"features"},"defaultParamMap":{"handleInvalid":"error","outputCol":"VectorAssembler_053b3eba42ef__output"}}

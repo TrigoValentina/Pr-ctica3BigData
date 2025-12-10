@@ -1,0 +1,1 @@
+{"class":"org.apache.spark.ml.feature.VectorAssembler","timestamp":1765341391778,"sparkVersion":"3.5.3","uid":"VectorAssembler_add9ea1aaae9","paramMap":{"outputCol":"features","inputCols":["hour","day_of_week","month","device_index","humidity_lag1","humidity_lag2","humidity_lag3"]},"defaultParamMap":{"outputCol":"VectorAssembler_add9ea1aaae9__output","handleInvalid":"error"}}
