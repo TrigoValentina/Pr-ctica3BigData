@@ -20,6 +20,7 @@ from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml import Pipeline
 import mysql.connector
 from pyspark.ml.feature import StandardScaler
+from pyspark.sql.functions import abs
 
 # Importar configuración
 sys.path.append('/opt/spark/app')
@@ -223,7 +224,11 @@ class RegressionTrainer:
         }
         
         logger.info(f"✅ Métricas - R²: {r2:.4f} | RMSE: {rmse:.4f} | MAE: {mae:.4f}")
-        
+        mape = predictions.select(
+    (abs(col(target_metric) - col("prediction")) / col(target_metric)) * 100
+).agg({"((abs((`{0}` - prediction)) / `{0}`) * 100))".format(target_metric): "avg"}).collect()[0][0]
+        logger.info(f"   MAPE: {mape:.2f}%")
+
         return metrics
     
     def save_model_metadata(self, target_metric, train_samples, model_path):
