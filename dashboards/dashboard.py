@@ -582,55 +582,107 @@ def crear_heatmap_hora_dia_semana(df, columna_valor):
 # =============================
 # FUNCIONES DE VISUALIZACIÓN ML
 # =============================
-def plot_real_vs_predicted(df_predictions, metric_name):
-    """Gráfica de Real vs Predicho (RF-01)"""
+def plot_real_vs_predicted(df_predictions, metric_name, rmse=None):
+    """Gráfica de Real vs Predicho con Intervalo de Confianza"""
     fig = go.Figure()
     
-    # Filtrar datos con valores reales
+    # Filtrar datos
     df_real = df_predictions[df_predictions['real_value'].notna()].copy()
-    
-    # Filtrar datos solo con predicciones (futuros)
     df_future = df_predictions[df_predictions['real_value'].isna()].copy()
     
-    # Línea de valores reales (azul sólido)
+    # --- Intervalo de Confianza (Si hay RMSE) ---
+    if rmse and not df_future.empty:
+        # Calcular límites solo para predicciones futuras
+        upper_bound = df_future['predicted_value'] + (1.96 * rmse)
+        lower_bound = df_future['predicted_value'] - (1.96 * rmse)
+        
+        # Área sombreada (Confidence Interval)
+        fig.add_trace(go.Scatter(
+            x=pd.concat([df_future['time'], df_future['time'][::-1]]),
+            y=pd.concat([upper_bound, lower_bound[::-1]]),
+            fill='toself',
+            fillcolor='rgba(255, 165, 0, 0.2)',
+            line=dict(color='rgba(255,255,255,0)'),
+            hoverinfo="skip",
+            name='Intervalo de Confianza (95%)'
+        ))
+
+    # --- Líneas de Datos ---
+    # Real
     if not df_real.empty:
         fig.add_trace(go.Scatter(
             x=df_real['time'],
             y=df_real['real_value'],
             mode='lines+markers',
             name='Valores Reales',
-            line=dict(color='blue', width=2),
-            marker=dict(size=4)
+            line=dict(color='#1f77b4', width=3),
+            marker=dict(size=6)
         ))
         
-        # Línea de predicciones sobre datos reales (naranja sólido)
+        # Predicción sobre datos reales
         fig.add_trace(go.Scatter(
-            x=df_real['time'],
+            x=df_real['time'], 
             y=df_real['predicted_value'],
-            mode='lines+markers',
-            name='Predicciones (datos reales)',
-            line=dict(color='orange', width=2),
-            marker=dict(size=4)
+            mode='lines',
+            name='Ajuste del Modelo',
+            line=dict(color='#ff7f0e', width=2, dash='dot'),
+            opacity=0.7
         ))
     
-    # Línea de predicciones futuras (naranja discontinuo)
+    # Futuro
     if not df_future.empty:
         fig.add_trace(go.Scatter(
             x=df_future['time'],
             y=df_future['predicted_value'],
             mode='lines+markers',
-            name='Predicciones Futuras',
-            line=dict(color='orange', width=2, dash='dash'),
-            marker=dict(size=4, symbol='diamond')
+            name='Pronóstico Futuro',
+            line=dict(color='#ff7f0e', width=3),
+            marker=dict(size=8, symbol='star')
         ))
     
     fig.update_layout(
-        title=f"Real vs Predicho - {metric_name}",
+        title=f"Pronóstico y Fiabilidad - {metric_name}",
         xaxis_title="Fecha",
         yaxis_title=metric_name,
         hovermode='x unified',
-        height=500,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        height=550,
+        legend=dict(orientation="h", y=1.1)
+    )
+    
+    return fig
+
+def plot_classification_timeline(df_class, labels):
+    """Timeline de clasificación con nivel de confianza"""
+    if df_class.empty:
+        return None
+        
+    # Mapear clases a colores
+    color_map = {
+        "Normal": "#2ca02c",  # Verde
+        "Alerta": "#ff7f0e",  # Naranja
+        "Crítico": "#d62728", # Rojo
+        "Desconocido": "#7f7f7f"
+    }
+    
+    fig = px.scatter(
+        df_class,
+        x='time',
+        y='predicted_class',
+        color='predicted_class',
+        size='confidence',
+        color_discrete_map=color_map,
+        labels={'confidence': 'Nivel de Confianza', 'predicted_class': 'Estado'},
+        title="Línea de Tiempo de Estados y Confiabilidad",
+        category_orders={"predicted_class": ["Normal", "Alerta", "Crítico"]}
+    )
+    
+    fig.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey')))
+    
+    fig.update_layout(
+        height=400,
+        yaxis_title="Estado Predicho",
+        xaxis_title="Tiempo",
+        showlegend=True
     )
     
     return fig
@@ -1175,7 +1227,13 @@ elif menu == "🤖 Machine Learning":
                     if future_only:
                         st.info("ℹ️ El rango seleccionado solo contiene fechas futuras. Mostrando únicamente predicciones.")
                     
-                    fig_real_pred = plot_real_vs_predicted(df_predictions, metric_name)
+                    # Obtener RMSE Global para intervalo de confianza
+                    global_rmse = None
+                    global_metrics = load_ml_metrics_regression(sensor_type, metric_name)
+                    if global_metrics:
+                        global_rmse = float(global_metrics['rmse'])
+
+                    fig_real_pred = plot_real_vs_predicted(df_predictions, metric_name, rmse=global_rmse)
                     st.plotly_chart(fig_real_pred, use_container_width=True)
                     
                     st.markdown("---")
@@ -1318,6 +1376,12 @@ elif menu == "🤖 Machine Learning":
                             color_discrete_sequence=px.colors.qualitative.Set3
                         )
                         st.plotly_chart(fig_pred, use_container_width=True)
+
+                        # --- NUEVO: Timeline de Confianza ---
+                        st.markdown("#### ⏳ Evolución de Estados y Confianza")
+                        fig_timeline = plot_classification_timeline(df_class, ["Normal", "Alerta", "Crítico"])
+                        if fig_timeline:
+                            st.plotly_chart(fig_timeline, use_container_width=True)
                         
                         # Tabla de predicciones
                         st.markdown("#### Tabla de Predicciones")
