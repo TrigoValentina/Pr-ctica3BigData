@@ -421,6 +421,16 @@ def load_ml_metrics_classification(sensor_type):
         if conn and conn.is_connected():
             conn.close()
 
+def safe_to_numeric(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    """
+    Convierte en numéricas las columnas indicadas si existen.
+    No lanza error si faltan columnas, solo las ignora.
+    """
+    for col in columns:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+    return df
+
 def calculate_metrics_for_range(df_predictions, metric_name):
     """Calcula métricas (R², RMSE, MAE) para un rango específico de predicciones"""
     # Filtrar solo registros con valores reales (no futuros)
@@ -885,12 +895,8 @@ if menu == "🔊 Calidad del Sonido (WS302)":
         st.warning("⚠️ No hay datos disponibles para sensores de sonido.")
     else:
         # Convertir columnas numéricas
-        if 'LAeq' in df.columns:
-            df['LAeq'] = pd.to_numeric(df['LAeq'], errors='coerce')
-        if 'LAI' in df.columns:
-            df['LAI'] = pd.to_numeric(df['LAI'], errors='coerce')
-        if 'LAImax' in df.columns:
-            df['LAImax'] = pd.to_numeric(df['LAImax'], errors='coerce')
+         # Convertir columnas numéricas de forma segura
+        df = safe_to_numeric(df, ['LAeq', 'LAI', 'LAImax'])
         
         # Filtrar datos válidos
         df_sonido = df[df['LAeq'].notna()].copy()
@@ -993,11 +999,9 @@ elif menu == "🌫️ Calidad del Aire (EM500)":
     if df.empty:
         st.warning("⚠️ No hay datos disponibles para sensores de calidad del aire.")
     else:
-        # Convertir columnas numéricas
+         # Convertir columnas numéricas de forma segura
         columnas_numericas = ['co2', 'temperature', 'humidity', 'pressure']
-        for col in columnas_numericas:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+        df = safe_to_numeric(df, columnas_numericas)
         
         # Métricas principales
         col1, col2, col3, col4 = st.columns(4)
@@ -1060,9 +1064,8 @@ elif menu == "🌱 Sensores Soterrados (EM310)":
     if df.empty:
         st.warning("⚠️ No hay datos disponibles para sensores soterrados.")
     else:
-        # Convertir columnas numéricas
-        if 'distance' in df.columns:
-            df['distance'] = pd.to_numeric(df['distance'], errors='coerce')
+         # Convertir columnas numéricas de forma segura
+        df = safe_to_numeric(df, ['distance'])
         
         # Métricas principales
         col1, col2, col3 = st.columns(3)
