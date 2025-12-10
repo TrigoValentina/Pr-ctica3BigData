@@ -19,6 +19,7 @@ from pyspark.ml.regression import RandomForestRegressor
 from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml import Pipeline
 import mysql.connector
+from pyspark.ml.feature import StandardScaler
 
 # Importar configuración
 sys.path.append('/opt/spark/app')
@@ -112,6 +113,12 @@ class RegressionTrainer:
     
     def train_model(self, df, target_metric):
         """Entrena modelo de regresión"""
+        scaler = StandardScaler(
+    inputCol="features",
+    outputCol="scaled_features",
+    withMean=True,
+    withStd=True
+)
         logger.info(f"🤖 Entrenando modelo para {target_metric}")
         
         # Definir features
@@ -137,7 +144,12 @@ class RegressionTrainer:
         )
         
         # Crear pipeline
-        pipeline = Pipeline(stages=[assembler, rf])
+        pipeline = Pipeline(stages=[
+    assembler,
+    # scaler,   # <-- añadido pero deshabilitado
+    rf
+])
+
         
         # Split train/test
         train_df, test_df = df.randomSplit(
