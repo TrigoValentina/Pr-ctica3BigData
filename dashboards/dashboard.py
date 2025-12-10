@@ -284,7 +284,10 @@ def leer_todos_datos_mysql():
 # FUNCIONES ML - PREDICCIONES
 # =============================
 def load_ml_predictions_regression(sensor_type, metric_name, date_from, date_to):
-    """Carga predicciones de regresión por rango de fechas"""
+    """
+    Carga predicciones de REGRESIÓN por rango de fechas.
+    Usa la tabla ml_predictions_regression.
+    """
     conn = None
     try:
         conn = get_mysql_connection()
@@ -301,14 +304,32 @@ def load_ml_predictions_regression(sensor_type, metric_name, date_from, date_to)
             ORDER BY time
         """
         
-        df = pd.read_sql(query, conn, params=(sensor_type, metric_name, date_from, date_to))
+        df = pd.read_sql(
+            query,
+            conn,
+            params=(sensor_type, metric_name, date_from, date_to)
+        )
         
-        if not df.empty:
+        if not df.empty and 'time' in df.columns:
             df['time'] = pd.to_datetime(df['time'])
         
         return df
     except Exception as e:
-        logger.error(f"Error cargando predicciones de regresión: {e}")
+        logger.error(f"❌ Error cargando predicciones de regresión: {e}")
+        return pd.DataFrame()
+    finally:
+        if conn and conn.is_connected():
+            conn.close()
+
+
+def load_ml_predictions_classification(sensor_type, date_from, date_to):
+    """
+    Carga predicciones de CLASIFICACIÓN por rango de fechas.
+    Usa la tabla ml_predictions_classification.
+    """
+    conn = None
+    try:
+        conn = get_mysql_connection()
         if conn is None:
             return pd.DataFrame()
         
@@ -321,14 +342,18 @@ def load_ml_predictions_regression(sensor_type, metric_name, date_from, date_to)
             ORDER BY time
         """
         
-        df = pd.read_sql(query, conn, params=(sensor_type, date_from, date_to))
+        df = pd.read_sql(
+            query,
+            conn,
+            params=(sensor_type, date_from, date_to)
+        )
         
-        if not df.empty:
+        if not df.empty and 'time' in df.columns:
             df['time'] = pd.to_datetime(df['time'])
         
         return df
     except Exception as e:
-        logger.error(f"Error cargando predicciones de clasificación: {e}")
+        logger.error(f"❌ Error cargando predicciones de clasificación: {e}")
         return pd.DataFrame()
     finally:
         if conn and conn.is_connected():
