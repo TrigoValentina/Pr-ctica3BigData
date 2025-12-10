@@ -284,7 +284,7 @@ def leer_todos_datos_mysql():
 # FUNCIONES ML - PREDICCIONES
 # =============================
 def load_ml_predictions_regression(sensor_type, metric_name, date_from, date_to):
-    """Carga predicciones de regresión por rango de fechas"""
+    """Carga predicciones de regresión por rango de fechas."""
     conn = None
     try:
         conn = get_mysql_connection()
@@ -292,8 +292,13 @@ def load_ml_predictions_regression(sensor_type, metric_name, date_from, date_to)
             return pd.DataFrame()
         
         query = """
-            SELECT sensor_type, device_name, time, metric_name, 
-                   real_value, predicted_value, model_version
+            SELECT sensor_type,
+                   device_name,
+                   time,
+                   metric_name,
+                   real_value,
+                   predicted_value,
+                   model_version
             FROM ml_predictions_regression
             WHERE sensor_type = %s 
               AND metric_name = %s
@@ -302,31 +307,45 @@ def load_ml_predictions_regression(sensor_type, metric_name, date_from, date_to)
         """
         
         df = pd.read_sql(query, conn, params=(sensor_type, metric_name, date_from, date_to))
-        
         if not df.empty:
-            df['time'] = pd.to_datetime(df['time'])
-        
+            df["time"] = pd.to_datetime(df["time"])
         return df
+
     except Exception as e:
         logger.error(f"Error cargando predicciones de regresión: {e}")
+        return pd.DataFrame()
+    finally:
+        if conn and conn.is_connected():
+            conn.close()
+
+
+def load_ml_predictions_classification(sensor_type, date_from, date_to):
+    """Carga predicciones de clasificación por rango de fechas."""
+    conn = None
+    try:
+        conn = get_mysql_connection()
         if conn is None:
             return pd.DataFrame()
         
         query = """
-            SELECT sensor_type, device_name, time, 
-                   real_class, predicted_class, confidence, model_version
+            SELECT sensor_type,
+                   device_name,
+                   time,
+                   real_class,
+                   predicted_class,
+                   confidence,
+                   model_version
             FROM ml_predictions_classification
-            WHERE sensor_type = %s 
+            WHERE sensor_type = %s
               AND time BETWEEN %s AND %s
             ORDER BY time
         """
         
         df = pd.read_sql(query, conn, params=(sensor_type, date_from, date_to))
-        
         if not df.empty:
-            df['time'] = pd.to_datetime(df['time'])
-        
+            df["time"] = pd.to_datetime(df["time"])
         return df
+
     except Exception as e:
         logger.error(f"Error cargando predicciones de clasificación: {e}")
         return pd.DataFrame()
